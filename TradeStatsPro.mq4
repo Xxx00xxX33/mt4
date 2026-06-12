@@ -126,6 +126,8 @@ int    g_chartH        = 0;
 bool   g_dragging      = false;
 int    g_dragOffsetX   = 0;
 int    g_dragOffsetY   = 0;
+int    g_lastMouseX    = 0;   // 最后一次鼠标X位置
+int    g_lastMouseY    = 0;   // 最后一次鼠标Y位置
 
 // 当前选中的行（用于轨迹显示）
 int    g_selectedRow   = -1;
@@ -2335,12 +2337,10 @@ void OnChartEvent(const int id,
         // 移动按钮：开始拖拽
         if(objName == PREFIX + "btn_move")
         {
-            // 获取当前鼠标位置（通过ChartGetInteger获取最后鼠标位置）
-            int mouseX = (int)ChartGetInteger(0, CHART_MOUSE_X);
-            int mouseY = (int)ChartGetInteger(0, CHART_MOUSE_Y);
+            // 使用最后记录的鼠标位置（由CHARTEVENT_MOUSE_MOVE持续更新）
             g_dragging = true;
-            g_dragOffsetX = mouseX - g_panelX;
-            g_dragOffsetY = mouseY - g_panelY;
+            g_dragOffsetX = g_lastMouseX - g_panelX;
+            g_dragOffsetY = g_lastMouseY - g_panelY;
             ObjectSetInteger(0, objName, OBJPROP_STATE, false);
             return;
         }
@@ -2364,6 +2364,10 @@ void OnChartEvent(const int id,
         int mouseX = (int)lparam;
         int mouseY = (int)dparam;
         int mouseBtn = (int)StringToInteger(sparam);
+
+        // 始终记录最新鼠标位置
+        g_lastMouseX = mouseX;
+        g_lastMouseY = mouseY;
 
         if(g_dragging)
         {
