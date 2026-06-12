@@ -728,9 +728,6 @@ void CalcDayStats()
     g_dayCount = 0;
     ArrayResize(g_dayStat, MAX_STATS);
 
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
     // 收集所有日期
     string dates[];
     int dateCount = 0;
@@ -738,7 +735,7 @@ void CalcDayStats()
 
     for(int i=0; i<g_tradeCount; i++)
     {
-        if(g_trades[i].closeTime == 0) continue; // 跳过持仓
+        if(g_trades[i].closeTime == 0) continue;
         string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
         bool found = false;
         for(int j=0; j<dateCount; j++)
@@ -750,10 +747,46 @@ void CalcDayStats()
         }
     }
 
-    // 排序（简单冒泡，降序）
+    // 升序排序（用于计算运行余额）
     for(int i=0; i<dateCount-1; i++)
         for(int j=i+1; j<dateCount; j++)
-            if(dates[i] < dates[j]) { string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp; }
+            if(dates[i] > dates[j]) { string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp; }
+
+    // 计算每天结束时的运行余额（按升序日期累计）
+    // 初始余额 = 当前账户余额 - 所有已关闭交易的盈亏之和
+    double totalClosedPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = AccountBalance();
+
+    // 按升序计算每天结束余额
+    double dayEndBalance[];
+    ArrayResize(dayEndBalance, dateCount);
+    double runBal = startBalance;
+    for(int di=0; di<dateCount; di++)
+    {
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
+            if(d != dates[di]) continue;
+            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+        }
+        dayEndBalance[di] = runBal;
+    }
+
+    // 降序排序日期（最新的在前）
+    for(int i=0; i<dateCount-1; i++)
+        for(int j=i+1; j<dateCount; j++)
+            if(dates[i] < dates[j])
+            {
+                string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp;
+                double tmpd=dayEndBalance[i]; dayEndBalance[i]=dayEndBalance[j]; dayEndBalance[j]=tmpd;
+            }
 
     // 限制数量
     if(dateCount > Day_Count) dateCount = Day_Count;
@@ -764,16 +797,25 @@ void CalcDayStats()
         InitStat(s);
         s.label = dates[di];
 
+        // 该天开始余额 = 该天结束余额 - 该天盈亏
+        double dayProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
             string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
             if(d != dates[di]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
+            AccumTrade(s, g_trades[i], 1.0); // 先用1作占位符
+            dayProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
+        // 该天开始余额
+        double periodStartBal = dayEndBalance[di] - dayProfit;
+        if(periodStartBal <= 0) periodStartBal = 1;
+
+        s.balance = dayEndBalance[di];
+
         if(s.count == 0 && !Day_ShowEmpty) continue;
-        FinalizeStat(s, baseBalance);
+        FinalizeStat(s, periodStartBal);
         g_dayStat[g_dayCount] = s;
         g_dayCount++;
     }
@@ -804,8 +846,6 @@ void CalcWeekStats()
 {
     g_weekCount = 0;
     ArrayResize(g_weekStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
 
     datetime weekStarts[];
     int wCount = 0;
@@ -825,10 +865,44 @@ void CalcWeekStats()
         }
     }
 
+    // 升序排序用于计算运行余额
+    for(int i=0; i<wCount-1; i++)
+        for(int j=i+1; j<wCount; j++)
+            if(weekStarts[i] > weekStarts[j]) { datetime tmp=weekStarts[i]; weekStarts[i]=weekStarts[j]; weekStarts[j]=tmp; }
+
+    // 计算初始余额
+    double totalClosedPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = AccountBalance();
+
+    // 按升序计算每周结束余额
+    double wkEndBal[];
+    ArrayResize(wkEndBal, wCount);
+    double runBal = startBalance;
+    for(int wi=0; wi<wCount; wi++)
+    {
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            if(GetWeekStart(g_trades[i].closeTime) != weekStarts[wi]) continue;
+            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+        }
+        wkEndBal[wi] = runBal;
+    }
+
     // 降序排序
     for(int i=0; i<wCount-1; i++)
         for(int j=i+1; j<wCount; j++)
-            if(weekStarts[i] < weekStarts[j]) { datetime tmp=weekStarts[i]; weekStarts[i]=weekStarts[j]; weekStarts[j]=tmp; }
+            if(weekStarts[i] < weekStarts[j])
+            {
+                datetime tmp=weekStarts[i]; weekStarts[i]=weekStarts[j]; weekStarts[j]=tmp;
+                double tmpd=wkEndBal[i]; wkEndBal[i]=wkEndBal[j]; wkEndBal[j]=tmpd;
+            }
 
     if(wCount > Week_Count) wCount = Week_Count;
 
@@ -838,16 +912,21 @@ void CalcWeekStats()
         InitStat(s);
         s.label = GetWeekLabel(weekStarts[wi]);
 
+        double wkProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            datetime ws = GetWeekStart(g_trades[i].closeTime);
-            if(ws != weekStarts[wi]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
+            if(GetWeekStart(g_trades[i].closeTime) != weekStarts[wi]) continue;
+            AccumTrade(s, g_trades[i], 1.0);
+            wkProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
+        double periodStartBal = wkEndBal[wi] - wkProfit;
+        if(periodStartBal <= 0) periodStartBal = 1;
+        s.balance = wkEndBal[wi];
+
         if(s.count == 0 && !Week_ShowEmpty) continue;
-        FinalizeStat(s, baseBalance);
+        FinalizeStat(s, periodStartBal);
         g_weekStat[g_weekCount] = s;
         g_weekCount++;
     }
@@ -876,8 +955,6 @@ void CalcMonthStats()
 {
     g_monthCount = 0;
     ArrayResize(g_monthStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
 
     datetime monthStarts[];
     int mCount = 0;
@@ -897,9 +974,42 @@ void CalcMonthStats()
         }
     }
 
+    // 升序排序用于计算运行余额
     for(int i=0; i<mCount-1; i++)
         for(int j=i+1; j<mCount; j++)
-            if(monthStarts[i] < monthStarts[j]) { datetime tmp=monthStarts[i]; monthStarts[i]=monthStarts[j]; monthStarts[j]=tmp; }
+            if(monthStarts[i] > monthStarts[j]) { datetime tmp=monthStarts[i]; monthStarts[i]=monthStarts[j]; monthStarts[j]=tmp; }
+
+    double totalClosedPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = AccountBalance();
+
+    double moEndBal[];
+    ArrayResize(moEndBal, mCount);
+    double runBal = startBalance;
+    for(int mi=0; mi<mCount; mi++)
+    {
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            if(GetMonthStart(g_trades[i].closeTime) != monthStarts[mi]) continue;
+            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+        }
+        moEndBal[mi] = runBal;
+    }
+
+    // 降序排序
+    for(int i=0; i<mCount-1; i++)
+        for(int j=i+1; j<mCount; j++)
+            if(monthStarts[i] < monthStarts[j])
+            {
+                datetime tmp=monthStarts[i]; monthStarts[i]=monthStarts[j]; monthStarts[j]=tmp;
+                double tmpd=moEndBal[i]; moEndBal[i]=moEndBal[j]; moEndBal[j]=tmpd;
+            }
 
     if(mCount > Month_Count) mCount = Month_Count;
 
@@ -909,16 +1019,21 @@ void CalcMonthStats()
         InitStat(s);
         s.label = GetMonthLabel(monthStarts[mi]);
 
+        double moProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            datetime ms = GetMonthStart(g_trades[i].closeTime);
-            if(ms != monthStarts[mi]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
+            if(GetMonthStart(g_trades[i].closeTime) != monthStarts[mi]) continue;
+            AccumTrade(s, g_trades[i], 1.0);
+            moProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
+        double periodStartBal = moEndBal[mi] - moProfit;
+        if(periodStartBal <= 0) periodStartBal = 1;
+        s.balance = moEndBal[mi];
+
         if(s.count == 0 && !Month_ShowEmpty) continue;
-        FinalizeStat(s, baseBalance);
+        FinalizeStat(s, periodStartBal);
         g_monthStat[g_monthCount] = s;
         g_monthCount++;
     }
@@ -971,12 +1086,9 @@ void CalcQuarterStats()
 {
     g_quarterCount = 0;
     ArrayResize(g_quarterStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
 
-    // 用字符串key分组，避免日期运算误差
     string qKeys[];
-    datetime qRepTime[]; // 每个季度的代表时间
+    datetime qRepTime[];
     int qCount = 0;
     ArrayResize(qKeys, MAX_STATS);
     ArrayResize(qRepTime, MAX_STATS);
@@ -996,13 +1108,46 @@ void CalcQuarterStats()
         }
     }
 
-    // 降序排序（按key字符串降序）
+    // 升序排序用于计算运行余额
+    for(int i=0; i<qCount-1; i++)
+        for(int j=i+1; j<qCount; j++)
+            if(qKeys[i] > qKeys[j])
+            {
+                string tmpk = qKeys[i]; qKeys[i] = qKeys[j]; qKeys[j] = tmpk;
+                datetime tmpt = qRepTime[i]; qRepTime[i] = qRepTime[j]; qRepTime[j] = tmpt;
+            }
+
+    double totalClosedPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = AccountBalance();
+
+    double qEndBal[];
+    ArrayResize(qEndBal, qCount);
+    double runBal = startBalance;
+    for(int qi=0; qi<qCount; qi++)
+    {
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            if(GetQuarterKey(g_trades[i].closeTime) != qKeys[qi]) continue;
+            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+        }
+        qEndBal[qi] = runBal;
+    }
+
+    // 降序排序
     for(int i=0; i<qCount-1; i++)
         for(int j=i+1; j<qCount; j++)
             if(qKeys[i] < qKeys[j])
             {
                 string tmpk = qKeys[i]; qKeys[i] = qKeys[j]; qKeys[j] = tmpk;
                 datetime tmpt = qRepTime[i]; qRepTime[i] = qRepTime[j]; qRepTime[j] = tmpt;
+                double tmpd = qEndBal[i]; qEndBal[i] = qEndBal[j]; qEndBal[j] = tmpd;
             }
 
     if(qCount > Quarter_Count) qCount = Quarter_Count;
@@ -1013,16 +1158,21 @@ void CalcQuarterStats()
         InitStat(s);
         s.label = GetQuarterLabel(qRepTime[qi]);
 
+        double qProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            string qk = GetQuarterKey(g_trades[i].closeTime);
-            if(qk != qKeys[qi]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
+            if(GetQuarterKey(g_trades[i].closeTime) != qKeys[qi]) continue;
+            AccumTrade(s, g_trades[i], 1.0);
+            qProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
+        double periodStartBal = qEndBal[qi] - qProfit;
+        if(periodStartBal <= 0) periodStartBal = 1;
+        s.balance = qEndBal[qi];
+
         if(s.count == 0 && !Quarter_ShowEmpty) continue;
-        FinalizeStat(s, baseBalance);
+        FinalizeStat(s, periodStartBal);
         g_quarterStat[g_quarterCount] = s;
         g_quarterCount++;
     }
@@ -1054,8 +1204,6 @@ void CalcYearStats()
 {
     g_yearCount = 0;
     ArrayResize(g_yearStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
 
     datetime yStarts[];
     int yCount = 0;
@@ -1075,9 +1223,42 @@ void CalcYearStats()
         }
     }
 
+    // 升序排序用于计算运行余额
     for(int i=0; i<yCount-1; i++)
         for(int j=i+1; j<yCount; j++)
-            if(yStarts[i] < yStarts[j]) { datetime tmp=yStarts[i]; yStarts[i]=yStarts[j]; yStarts[j]=tmp; }
+            if(yStarts[i] > yStarts[j]) { datetime tmp=yStarts[i]; yStarts[i]=yStarts[j]; yStarts[j]=tmp; }
+
+    double totalClosedPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = AccountBalance();
+
+    double yEndBal[];
+    ArrayResize(yEndBal, yCount);
+    double runBal = startBalance;
+    for(int yi=0; yi<yCount; yi++)
+    {
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            if(GetYearStart(g_trades[i].closeTime) != yStarts[yi]) continue;
+            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+        }
+        yEndBal[yi] = runBal;
+    }
+
+    // 降序排序
+    for(int i=0; i<yCount-1; i++)
+        for(int j=i+1; j<yCount; j++)
+            if(yStarts[i] < yStarts[j])
+            {
+                datetime tmp=yStarts[i]; yStarts[i]=yStarts[j]; yStarts[j]=tmp;
+                double tmpd=yEndBal[i]; yEndBal[i]=yEndBal[j]; yEndBal[j]=tmpd;
+            }
 
     if(yCount > Year_Count) yCount = Year_Count;
 
@@ -1087,16 +1268,21 @@ void CalcYearStats()
         InitStat(s);
         s.label = GetYearLabel(yStarts[yi]);
 
+        double yProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            datetime ys = GetYearStart(g_trades[i].closeTime);
-            if(ys != yStarts[yi]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
+            if(GetYearStart(g_trades[i].closeTime) != yStarts[yi]) continue;
+            AccumTrade(s, g_trades[i], 1.0);
+            yProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
+        double periodStartBal = yEndBal[yi] - yProfit;
+        if(periodStartBal <= 0) periodStartBal = 1;
+        s.balance = yEndBal[yi];
+
         if(s.count == 0 && !Year_ShowEmpty) continue;
-        FinalizeStat(s, baseBalance);
+        FinalizeStat(s, periodStartBal);
         g_yearStat[g_yearCount] = s;
         g_yearCount++;
     }
@@ -1683,9 +1869,9 @@ void DrawEquityCurve(int panelX, int panelY, int panelW)
 //==========================================================================
 // 绘制综合视图（综 TAB）
 //==========================================================================
-void DrawSummaryTab(int px, int py, int panelW)
+void DrawSummaryTab(int px, int py, int panelW, int chartH)
 {
-    int y = py + TITLE_H + TAB_H + CHART_H;
+    int y = py + TITLE_H + TAB_H + chartH;
     int x = px;
 
     // 计算综合统计（持仓+最近N天）
@@ -2140,7 +2326,11 @@ void DrawPanel()
     int tableH = HEADER_H + contentRows * ROW_H + 10;
     if(tableH < 60) tableH = 60;
 
-    int totalH = TITLE_H + TAB_H + CHART_H + tableH;
+    // 综合视图不显示图表区域
+    bool showChart = (g_currentTab != "综");
+    int effectiveChartH = showChart ? CHART_H : 0;
+
+    int totalH = TITLE_H + TAB_H + effectiveChartH + tableH;
     PANEL_H = totalH;
 
     // 主背景
@@ -2149,20 +2339,15 @@ void DrawPanel()
     // 标题栏
     CreateRect("bg_title", px, py, panelW, TITLE_H, ColorHeader);
 
-    // 左侧按钮：折叠按钮（+/-）和移动按钮（⊕）
+    // 左侧按钮
     int btnSize = TITLE_H - 4;
-    // 折叠按钮（第一个）
-    CreateButton("btn_min", px + 2, py + 2, btnSize, btnSize, g_minimized ? "+" : "-", C'40,40,60', ColorGray, FontSize+2);
-    // 移动按钮（第二个）
+    CreateButton("btn_min",  px + 2,               py + 2, btnSize, btnSize, g_minimized ? "+" : "-", C'40,40,60', ColorGray, FontSize+2);
     CreateButton("btn_move", px + 2 + btnSize + 2, py + 2, btnSize, btnSize, "+", C'40,40,60', ColorGray, FontSize+2);
 
-    // 标题文字（在按钮右边）
+    // 标题文字
     int titleX = px + 2 + (btnSize + 2) * 2 + 4;
     string titleText = CustomTitle + "，M=" + FilterMagic;
     CreateLabel("lbl_title", titleX, py+3, titleText, ColorGreen, FontSize+1);
-
-    // 右上角链接
-    CreateLabel("lbl_link", px + panelW - 5, py+3, "外汇智能指标  https://fxznzb.com/", ColorGray, FontSize);
 
     if(g_minimized) return;
 
@@ -2178,18 +2363,19 @@ void DrawPanel()
         tabX += tabW + 1;
     }
 
-    // 图表区域背景
-    CreateRect("bg_chart", px, py + TITLE_H + TAB_H, panelW, CHART_H, C'10,10,20', 1, ColorBorder);
-
-    // 绘制净值曲线（使用图表对象）
-    DrawEquityCurve(px, py, panelW);
+    // 图表区域（综合视图不显示）
+    if(showChart)
+    {
+        CreateRect("bg_chart", px, py + TITLE_H + TAB_H, panelW, CHART_H, C'10,10,20', 1, ColorBorder);
+        DrawEquityCurve(px, py, panelW);
+    }
 
     // 内容区域背景
-    CreateRect("bg_content", px, py + TITLE_H + TAB_H + CHART_H, panelW, tableH, ColorBG);
+    CreateRect("bg_content", px, py + TITLE_H + TAB_H + effectiveChartH, panelW, tableH, ColorBG);
 
     // 根据当前TAB绘制内容
     if(g_currentTab == "综")
-        DrawSummaryTab(px, py, panelW);
+        DrawSummaryTab(px, py, panelW, effectiveChartH);
     else if(g_currentTab == "日" || g_currentTab == "周" || g_currentTab == "月" ||
             g_currentTab == "季" || g_currentTab == "年")
         DrawTimeTab(px, py, panelW, g_currentTab);
