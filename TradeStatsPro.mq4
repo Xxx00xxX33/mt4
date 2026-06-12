@@ -450,12 +450,12 @@ void LoadFromMT4()
     
     // 加载出入金记录
     g_depositCount = 0;
-    for(int i=0; i<total; i++)
+    for(int i2=0; i2<total; i2++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        int type = OrderType();
+        if(!OrderSelect(i2, SELECT_BY_POS, MODE_HISTORY)) continue;
+        int type2 = OrderType();
         // OP_BALANCE=6, OP_CREDIT=7
-        if(type != 6 && type != 7) continue;
+        if(type2 != 6 && type2 != 7) continue;
         if(g_depositCount >= MAX_DEPOSITS) break;
         g_deposits[g_depositCount].time   = OrderCloseTime();
         g_deposits[g_depositCount].amount = OrderProfit();
@@ -531,8 +531,8 @@ double CalcStartBalance()
         totalPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
     double totalDeposit = 0;
-    for(int i=0; i<g_depositCount; i++)
-        totalDeposit += g_deposits[i].amount;
+    for(int id=0; id<g_depositCount; id++)
+        totalDeposit += g_deposits[id].amount;
     
     double startBal = AccountBalance() - totalPnL - totalDeposit;
     if(startBal < 0) startBal = 0;
@@ -717,12 +717,12 @@ void CalcGroupStats(StatRow &outArr[], int &outCount, int maxCount,
     }
     
     // 升序排序
-    for(int i=0; i<kCount-1; i++)
-        for(int j=i+1; j<kCount; j++)
-            if(keys[i] > keys[j])
+    for(int si=0; si<kCount-1; si++)
+        for(int sj=si+1; sj<kCount; sj++)
+            if(keys[si] > keys[sj])
             {
-                string tk = keys[i]; keys[i]=keys[j]; keys[j]=tk;
-                datetime tt = keyTimes[i]; keyTimes[i]=keyTimes[j]; keyTimes[j]=tt;
+                string stk = keys[si]; keys[si]=keys[sj]; keys[sj]=stk;
+                datetime stt = keyTimes[si]; keyTimes[si]=keyTimes[sj]; keyTimes[sj]=stt;
             }
     
     // 计算运行余额（升序）
@@ -742,64 +742,64 @@ void CalcGroupStats(StatRow &outArr[], int &outCount, int maxCount,
         depAmts[ki] = dep;
         runBal += dep;
         
-        for(int i=0; i<g_tradeCount; i++)
+        for(int ri=0; ri<g_tradeCount; ri++)
         {
-            if(g_trades[i].closeTime == 0) continue;
-            string k = "";
-            if(mode=="day")     k = DayKey(g_trades[i].closeTime);
-            else if(mode=="week")  k = WeekKey(g_trades[i].closeTime);
-            else if(mode=="month") k = MonthKey(g_trades[i].closeTime);
-            else if(mode=="quarter") k = QuarterKey(g_trades[i].closeTime);
-            else if(mode=="year")  k = YearKey(g_trades[i].closeTime);
-            if(k != keys[ki]) continue;
-            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+            if(g_trades[ri].closeTime == 0) continue;
+            string rk = "";
+            if(mode=="day")     rk = DayKey(g_trades[ri].closeTime);
+            else if(mode=="week")  rk = WeekKey(g_trades[ri].closeTime);
+            else if(mode=="month") rk = MonthKey(g_trades[ri].closeTime);
+            else if(mode=="quarter") rk = QuarterKey(g_trades[ri].closeTime);
+            else if(mode=="year")  rk = YearKey(g_trades[ri].closeTime);
+            if(rk != keys[ki]) continue;
+            runBal += g_trades[ri].profit + g_trades[ri].commission + g_trades[ri].swap;
         }
         endBals[ki] = runBal;
     }
     
     // 降序输出（最新在前）
-    for(int i=0; i<kCount-1; i++)
-        for(int j=i+1; j<kCount; j++)
-            if(keys[i] < keys[j])
+    for(int di=0; di<kCount-1; di++)
+        for(int dj=di+1; dj<kCount; dj++)
+            if(keys[di] < keys[dj])
             {
-                string tk=keys[i]; keys[i]=keys[j]; keys[j]=tk;
-                datetime tt=keyTimes[i]; keyTimes[i]=keyTimes[j]; keyTimes[j]=tt;
-                double td=endBals[i]; endBals[i]=endBals[j]; endBals[j]=td;
-                double tda=depAmts[i]; depAmts[i]=depAmts[j]; depAmts[j]=tda;
+                string dtk=keys[di]; keys[di]=keys[dj]; keys[dj]=dtk;
+                datetime dtt=keyTimes[di]; keyTimes[di]=keyTimes[dj]; keyTimes[dj]=dtt;
+                double dtd=endBals[di]; endBals[di]=endBals[dj]; endBals[dj]=dtd;
+                double dtda=depAmts[di]; depAmts[di]=depAmts[dj]; depAmts[dj]=dtda;
             }
     
     int limit = (maxCount > 0 && kCount > maxCount) ? maxCount : kCount;
     
-    for(int ki=0; ki<limit; ki++)
+    for(int ki2=0; ki2<limit; ki2++)
     {
         StatRow s;
         InitRow(s);
         
-        if(mode=="day")     s.label = DayLabel(keyTimes[ki]);
-        else if(mode=="week")  s.label = WeekLabel(keyTimes[ki]);
-        else if(mode=="month") s.label = MonthLabel(keyTimes[ki]);
-        else if(mode=="quarter") s.label = QuarterLabel(keyTimes[ki]);
-        else if(mode=="year")  s.label = YearLabel(keyTimes[ki]);
+        if(mode=="day")     s.label = DayLabel(keyTimes[ki2]);
+        else if(mode=="week")  s.label = WeekLabel(keyTimes[ki2]);
+        else if(mode=="month") s.label = MonthLabel(keyTimes[ki2]);
+        else if(mode=="quarter") s.label = QuarterLabel(keyTimes[ki2]);
+        else if(mode=="year")  s.label = YearLabel(keyTimes[ki2]);
         
-        s.deposit = depAmts[ki];
+        s.deposit = depAmts[ki2];
         
-        for(int i=0; i<g_tradeCount; i++)
+        for(int ai=0; ai<g_tradeCount; ai++)
         {
-            if(g_trades[i].closeTime == 0) continue;
-            string k = "";
-            if(mode=="day")     k = DayKey(g_trades[i].closeTime);
-            else if(mode=="week")  k = WeekKey(g_trades[i].closeTime);
-            else if(mode=="month") k = MonthKey(g_trades[i].closeTime);
-            else if(mode=="quarter") k = QuarterKey(g_trades[i].closeTime);
-            else if(mode=="year")  k = YearKey(g_trades[i].closeTime);
-            if(k != keys[ki]) continue;
-            AccumTrade(s, g_trades[i]);
+            if(g_trades[ai].closeTime == 0) continue;
+            string ak = "";
+            if(mode=="day")     ak = DayKey(g_trades[ai].closeTime);
+            else if(mode=="week")  ak = WeekKey(g_trades[ai].closeTime);
+            else if(mode=="month") ak = MonthKey(g_trades[ai].closeTime);
+            else if(mode=="quarter") ak = QuarterKey(g_trades[ai].closeTime);
+            else if(mode=="year")  ak = YearKey(g_trades[ai].closeTime);
+            if(ak != keys[ki2]) continue;
+            AccumTrade(s, g_trades[ai]);
         }
         
         if(s.count == 0 && !showEmpty) continue;
         
-        s.balance = endBals[ki];
-        double periodStartBal = endBals[ki] - s.profit - s.deposit;
+        s.balance = endBals[ki2];
+        double periodStartBal = endBals[ki2] - s.profit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
         FinalizeRow(s, periodStartBal);
         
@@ -825,26 +825,26 @@ void GetPeriodRange(string mode, datetime repTime, datetime &t1, datetime &t2)
     }
     else if(mode == "month")
     {
-        int y = TimeYear(repTime), m = TimeMonth(repTime);
-        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", y, m));
-        int nm = m+1, ny = y;
-        if(nm > 12) { nm=1; ny++; }
-        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", ny, nm));
+        int my = TimeYear(repTime), mm = TimeMonth(repTime);
+        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", my, mm));
+        int mnm = mm+1, mny = my;
+        if(mnm > 12) { mnm=1; mny++; }
+        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", mny, mnm));
     }
     else if(mode == "quarter")
     {
-        int y = TimeYear(repTime), m = TimeMonth(repTime);
-        int qs = ((m-1)/3)*3+1;
-        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", y, qs));
-        int qe = qs+3, qy = y;
-        if(qe > 12) { qe -= 12; qy++; }
-        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", qy, qe));
+        int qy = TimeYear(repTime), qm = TimeMonth(repTime);
+        int qs = ((qm-1)/3)*3+1;
+        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", qy, qs));
+        int qe = qs+3, qey = qy;
+        if(qe > 12) { qe -= 12; qey++; }
+        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", qey, qe));
     }
     else // year
     {
-        int y = TimeYear(repTime);
-        t1 = StringToTime(StringFormat("%04d.01.01 00:00:00", y));
-        t2 = StringToTime(StringFormat("%04d.01.01 00:00:00", y+1));
+        int yy = TimeYear(repTime);
+        t1 = StringToTime(StringFormat("%04d.01.01 00:00:00", yy));
+        t2 = StringToTime(StringFormat("%04d.01.01 00:00:00", yy+1));
     }
 }
 
@@ -881,21 +881,21 @@ void CalcGroupByField(StatRow &outArr[], int &outCount, string field)
         }
     }
     
-    for(int ki=0; ki<kCount; ki++)
+    for(int gki=0; gki<kCount; gki++)
     {
         StatRow s;
         InitRow(s);
-        s.label = keys[ki];
+        s.label = keys[gki];
         
-        for(int i=0; i<g_tradeCount; i++)
+        for(int gi=0; gi<g_tradeCount; gi++)
         {
-            if(g_trades[i].closeTime == 0) continue;
-            string k = "";
-            if(field == "symbol")  k = g_trades[i].symbol;
-            else if(field == "magic")   k = IntegerToString(g_trades[i].magic);
-            else if(field == "comment") k = g_trades[i].comment;
-            if(k != keys[ki]) continue;
-            AccumTrade(s, g_trades[i]);
+            if(g_trades[gi].closeTime == 0) continue;
+            string gk = "";
+            if(field == "symbol")  gk = g_trades[gi].symbol;
+            else if(field == "magic")   gk = IntegerToString(g_trades[gi].magic);
+            else if(field == "comment") gk = g_trades[gi].comment;
+            if(gk != keys[gki]) continue;
+            AccumTrade(s, g_trades[gi]);
         }
         
         FinalizeRow(s, baseBalance);
@@ -1106,11 +1106,12 @@ void UpdateLabel(string name, string text, color clr)
 // 删除所有本指标对象
 void DeleteAllObjects()
 {
-    for(int i=ObjectsTotal(0)-1; i>=0; i--)
+    int objTotal = ObjectsTotal();
+    for(int i=objTotal-1; i>=0; i--)
     {
-        string name = ObjectName(0, i);
+        string name = ObjectName(i);
         if(StringFind(name, g_prefix) == 0)
-            ObjectDelete(0, name);
+            ObjectDelete(name);
     }
 }
 
@@ -1268,11 +1269,12 @@ int DrawStatRow(string rowId, int x, int y, StatRow &s, bool isHolding)
 void DrawEquityCurve(int x, int y, int w, int h)
 {
     // 清除旧曲线
-    for(int i=ObjectsTotal(0)-1; i>=0; i--)
+    int curveTotal = ObjectsTotal();
+    for(int ci=curveTotal-1; ci>=0; ci--)
     {
-        string nm = ObjectName(0, i);
+        string nm = ObjectName(ci);
         if(StringFind(nm, g_prefix+"curve_") == 0)
-            ObjectDelete(0, nm);
+            ObjectDelete(nm);
     }
     
     if(g_curveCount < 2 || h < 10) return;
@@ -1293,10 +1295,10 @@ void DrawEquityCurve(int x, int y, int w, int h)
     
     // 绘制曲线线段（用细矩形近似）
     int prevPx = -1, prevPy = -1;
-    for(int i=0; i<g_curveCount; i++)
+    for(int pi=0; pi<g_curveCount; pi++)
     {
-        int px = x + margin + (int)((double)i / (g_curveCount-1) * drawW);
-        int py = y + margin + (int)((maxV - g_curveVals[i]) / range * drawH);
+        int px = x + margin + (int)((double)pi / (g_curveCount-1) * drawW);
+        int py = y + margin + (int)((maxV - g_curveVals[pi]) / range * drawH);
         
         if(prevPx >= 0)
         {
@@ -1305,12 +1307,12 @@ void DrawEquityCurve(int x, int y, int w, int h)
             int dy = py - prevPy;
             int steps = MathMax(MathAbs(dx), MathAbs(dy));
             if(steps < 1) steps = 1;
-            for(int s=0; s<=steps; s++)
+            for(int ps=0; ps<=steps; ps++)
             {
-                int lx = prevPx + (int)((double)s/steps * dx);
-                int ly = prevPy + (int)((double)s/steps * dy);
-                string nm = g_prefix + "curve_" + IntegerToString(i) + "_" + IntegerToString(s);
-                MakeRect(nm, lx, ly, 1, 1, ColorCurve);
+                int lx = prevPx + (int)((double)ps/steps * dx);
+                int ly = prevPy + (int)((double)ps/steps * dy);
+                string cnm = g_prefix + "curve_" + IntegerToString(pi) + "_" + IntegerToString(ps);
+                MakeRect(cnm, lx, ly, 1, 1, ColorCurve);
             }
         }
         prevPx = px;
@@ -1410,11 +1412,12 @@ void DrawPanel()
     else
     {
         // 删除旧曲线
-        for(int i=ObjectsTotal(0)-1; i>=0; i--)
+        int delCurveTotal = ObjectsTotal();
+        for(int dci=delCurveTotal-1; dci>=0; dci--)
         {
-            string nm = ObjectName(0, i);
-            if(StringFind(nm, g_prefix+"curve_") == 0)
-                ObjectDelete(0, nm);
+            string nm2 = ObjectName(dci);
+            if(StringFind(nm2, g_prefix+"curve_") == 0)
+                ObjectDelete(nm2);
         }
     }
     
@@ -1487,23 +1490,23 @@ int DrawTimeTab(int x, int y, StatRow &arr[], int cnt, string labelCol)
         StatRow total;
         InitRow(total);
         total.label = "合计";
-        for(int i=0; i<cnt; i++)
+        for(int ti=0; ti<cnt; ti++)
         {
-            total.lots       += arr[i].lots;
-            total.count      += arr[i].count;
-            total.profit     += arr[i].profit;
-            total.commission += arr[i].commission;
-            total.swap       += arr[i].swap;
-            total.deposit    += arr[i].deposit;
-            total.winCount   += arr[i].winCount;
-            total.winCountW  += arr[i].winCountW;
-            total.winProfit  += arr[i].winProfit;
-            total.lossProfit += arr[i].lossProfit;
-            if(arr[i].minLots < total.minLots) total.minLots = arr[i].minLots;
-            if(arr[i].maxLots > total.maxLots) total.maxLots = arr[i].maxLots;
-            if(arr[i].minDuration < total.minDuration) total.minDuration = arr[i].minDuration;
-            if(arr[i].maxDuration > total.maxDuration) total.maxDuration = arr[i].maxDuration;
-            total.avgDuration += arr[i].avgDuration;
+            total.lots       += arr[ti].lots;
+            total.count      += arr[ti].count;
+            total.profit     += arr[ti].profit;
+            total.commission += arr[ti].commission;
+            total.swap       += arr[ti].swap;
+            total.deposit    += arr[ti].deposit;
+            total.winCount   += arr[ti].winCount;
+            total.winCountW  += arr[ti].winCountW;
+            total.winProfit  += arr[ti].winProfit;
+            total.lossProfit += arr[ti].lossProfit;
+            if(arr[ti].minLots < total.minLots) total.minLots = arr[ti].minLots;
+            if(arr[ti].maxLots > total.maxLots) total.maxLots = arr[ti].maxLots;
+            if(arr[ti].minDuration < total.minDuration) total.minDuration = arr[ti].minDuration;
+            if(arr[ti].maxDuration > total.maxDuration) total.maxDuration = arr[ti].maxDuration;
+            total.avgDuration += arr[ti].avgDuration;
         }
         if(cnt > 0) total.avgDuration /= cnt;
         if(total.minLots >= 1e9) total.minLots = 0;
