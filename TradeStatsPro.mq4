@@ -122,6 +122,11 @@ datetime g_lastRefresh = 0;
 int    g_chartW        = 0;
 int    g_chartH        = 0;
 
+// 面板拖拽状态
+bool   g_dragging      = false;
+int    g_dragOffsetX   = 0;
+int    g_dragOffsetY   = 0;
+
 // 当前选中的行（用于轨迹显示）
 int    g_selectedRow   = -1;
 string g_selectedPeriod = "";
@@ -1550,11 +1555,11 @@ void DrawStatRow(string rowId, int x, int y, int panelW, StatSummary &s, bool is
 }
 
 //==========================================================================
-// 绘制净值曲线（在图表上）
+// 绘制净值曲线（像素坐标系，在面板内部绘制）
 //==========================================================================
 void DrawEquityCurve(int panelX, int panelY, int panelW)
 {
-    // 删除旧曲线
+    // 删除旧曲线对象
     int total = ObjectsTotal();
     for(int i=total-1; i>=0; i--)
     {
@@ -1565,7 +1570,7 @@ void DrawEquityCurve(int panelX, int panelY, int panelW)
 
     if(g_equityCount < 2) return;
 
-    // 找最大最小值
+    // 找最大最小値
     double maxVal = g_equityCurve[0];
     double minVal = g_equityCurve[0];
     for(int i=1; i<g_equityCount; i++)
@@ -1574,27 +1579,101 @@ void DrawEquityCurve(int panelX, int panelY, int panelW)
         if(g_equityCurve[i] < minVal) minVal = g_equityCurve[i];
     }
     if(maxVal == minVal) { maxVal += 1; minVal -= 1; }
+    double valRange = maxVal - minVal;
 
-    int chartH2 = CHART_H - 10;
-    int chartY0 = panelY + TITLE_H + TAB_H;
+    // 图表区域像素范围
+    int chartAreaX = panelX;
+    int chartAreaY = panelY + TITLE_H + TAB_H;
+    int chartAreaW = panelW;
+    int chartAreaH = CHART_H;
+    int margin = 5;
+    int drawW = chartAreaW - margin * 2;
+    int drawH = chartAreaH - margin * 2;
 
-    // 绘制曲线折线段
+    // 将数据点映射到像素坐标
+    int px[];
+    int py2[];
+    ArrayResize(px, g_equityCount);
+    ArrayResize(py2, g_equityCount);
+
+    for(int i=0; i<g_equityCount; i++)
+    {
+        // X坐标：按时间线性分布
+        px[i] = chartAreaX + margin + (int)((double)i / (double)(g_equityCount - 1) * drawW);
+        // Y坐标：高值在上，低値在下
+        double ratio = (g_equityCurve[i] - minVal) / valRange;
+        py2[i] = chartAreaY + margin + drawH - (int)(ratio * drawH);
+    }
+
+    // 用细矩形模拟线段（每两个相邻点之间画一条线）
     for(int i=0; i<g_equityCount-1; i++)
     {
-        string tname = PREFIX + "eq_trend_" + IntegerToString(i);
-        if(ObjectFind(tname) < 0)
-            ObjectCreate(0, tname, OBJ_TREND, 0, g_equityTime[i], 0, g_equityTime[i+1], 0);
-        ObjectSetInteger(0, tname, OBJPROP_TIME1, g_equityTime[i]);
-        ObjectSetInteger(0, tname, OBJPROP_TIME2, g_equityTime[i+1]);
-        // 使用价格轴映射到面板高度（简化：直接用价格）
-        ObjectSetDouble(0, tname, OBJPROP_PRICE1, g_equityCurve[i]);
-        ObjectSetDouble(0, tname, OBJPROP_PRICE2, g_equityCurve[i+1]);
-        ObjectSetInteger(0, tname, OBJPROP_COLOR, ColorEquityLine);
-        ObjectSetInteger(0, tname, OBJPROP_WIDTH, 2);
-        ObjectSetInteger(0, tname, OBJPROP_BACK, true);
-        ObjectSetInteger(0, tname, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, tname, OBJPROP_RAY_RIGHT, false);
-        ObjectSetInteger(0, tname, OBJPROP_RAY_LEFT, false);
+        int x1 = px[i],  y1 = py2[i];
+        int x2 = px[i+1], y2 = py2[i+1];
+
+        // 用小矩形模拟线段：将线段分解为水平和垂直分量
+        string sname = PREFIX + "eq_seg_" + IntegerToString(i);
+
+        int dx = x2 - x1;
+        int dy = y2 - y1;
+        int steps = MathMax(MathAbs(dx), MathAbs(dy));
+        if(steps <= 0) steps = 1;
+
+        // 简化：只绘制水平线段（将线段用一个矩形表示）
+        // 使用 OBJ_RECTANGLE_LABEL 画一个细矩形表示线段
+        // 对于斜线，用多个小点近似
+        int numDots = MathMax(MathAbs(dx), 1);
+        for(int d=0; d<numDots; d++)
+        {
+            int dotX = x1 + (int)((double)d / numDots * dx);
+            int dotY = y1 + (int)((double)d / numDots * dy);
+            string dname = PREFIX + "eq_dot_" + IntegerToString(i) + "_" + IntegerToString(d);
+            if(ObjectFind(dname) < 0)
+                ObjectCreate(0, dname, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+            ObjectSetInteger(0, dname, OBJPROP_XDISTANCE, dotX);
+            ObjectSetInteger(0, dname, OBJPROP_YDISTANCE, dotY);
+            ObjectSetInteger(0, dname, OBJPROP_XSIZE, 2);
+            ObjectSetInteger(0, dname, OBJPROP_YSIZE, 2);
+            ObjectSetInteger(0, dname, OBJPROP_BGCOLOR, ColorEquityLine);
+            ObjectSetInteger(0, dname, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+            ObjectSetInteger(0, dname, OBJPROP_COLOR, ColorEquityLine);
+            ObjectSetInteger(0, dname, OBJPROP_BACK, false);
+            ObjectSetInteger(0, dname, OBJPROP_SELECTABLE, false);
+            ObjectSetInteger(0, dname, OBJPROP_HIDDEN, true);
+            ObjectSetInteger(0, dname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        }
+    }
+
+    // 在曲线两端显示日期标注
+    if(g_equityCount >= 2)
+    {
+        string lname = PREFIX + "eq_lbl_left";
+        if(ObjectFind(lname) < 0) ObjectCreate(0, lname, OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, lname, OBJPROP_XDISTANCE, chartAreaX + margin);
+        ObjectSetInteger(0, lname, OBJPROP_YDISTANCE, chartAreaY + chartAreaH - FontSize - 2);
+        ObjectSetString(0, lname, OBJPROP_TEXT, TimeToStr(g_equityTime[0], TIME_DATE));
+        ObjectSetInteger(0, lname, OBJPROP_COLOR, ColorDimGray);
+        ObjectSetInteger(0, lname, OBJPROP_FONTSIZE, FontSize - 1);
+        ObjectSetString(0, lname, OBJPROP_FONT, "Arial");
+        ObjectSetInteger(0, lname, OBJPROP_BACK, false);
+        ObjectSetInteger(0, lname, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, lname, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, lname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, lname, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+
+        string rname = PREFIX + "eq_lbl_right";
+        if(ObjectFind(rname) < 0) ObjectCreate(0, rname, OBJ_LABEL, 0, 0, 0);
+        ObjectSetInteger(0, rname, OBJPROP_XDISTANCE, chartAreaX + chartAreaW - margin);
+        ObjectSetInteger(0, rname, OBJPROP_YDISTANCE, chartAreaY + chartAreaH - FontSize - 2);
+        ObjectSetString(0, rname, OBJPROP_TEXT, TimeToStr(g_equityTime[g_equityCount-1], TIME_DATE));
+        ObjectSetInteger(0, rname, OBJPROP_COLOR, ColorDimGray);
+        ObjectSetInteger(0, rname, OBJPROP_FONTSIZE, FontSize - 1);
+        ObjectSetString(0, rname, OBJPROP_FONT, "Arial");
+        ObjectSetInteger(0, rname, OBJPROP_BACK, false);
+        ObjectSetInteger(0, rname, OBJPROP_SELECTABLE, false);
+        ObjectSetInteger(0, rname, OBJPROP_HIDDEN, true);
+        ObjectSetInteger(0, rname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSetInteger(0, rname, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
     }
 }
 
@@ -2067,14 +2146,21 @@ void DrawPanel()
 
     // 标题栏
     CreateRect("bg_title", px, py, panelW, TITLE_H, ColorHeader);
+
+    // 左侧按钮：折叠按钮（+/-）和移动按钮（⊕）
+    int btnSize = TITLE_H - 4;
+    // 折叠按钮（第一个）
+    CreateButton("btn_min", px + 2, py + 2, btnSize, btnSize, g_minimized ? "+" : "-", C'40,40,60', ColorGray, FontSize+2);
+    // 移动按钮（第二个）
+    CreateButton("btn_move", px + 2 + btnSize + 2, py + 2, btnSize, btnSize, "+", C'40,40,60', ColorGray, FontSize+2);
+
+    // 标题文字（在按钮右边）
+    int titleX = px + 2 + (btnSize + 2) * 2 + 4;
     string titleText = CustomTitle + "，M=" + FilterMagic;
-    CreateLabel("lbl_title", px+5, py+3, titleText, ColorGreen, FontSize+1);
+    CreateLabel("lbl_title", titleX, py+3, titleText, ColorGreen, FontSize+1);
 
     // 右上角链接
     CreateLabel("lbl_link", px + panelW - 5, py+3, "外汇智能指标  https://fxznzb.com/", ColorGray, FontSize);
-
-    // 最小化按钮
-    CreateButton("btn_min", px + panelW - 18, py + 2, 16, 16, g_minimized ? "+" : "-", ColorHeader, ColorGray, FontSize+2);
 
     if(g_minimized) return;
 
@@ -2164,6 +2250,9 @@ int OnInit()
         if(TABS[i] == g_currentTab) { validTab = true; break; }
     if(!validTab) g_currentTab = "综";
 
+    // 开启鼠标移动事件
+    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, 1);
+
     // 首次刷新
     RefreshAll();
 
@@ -2243,6 +2332,19 @@ void OnChartEvent(const int id,
             return;
         }
 
+        // 移动按钮：开始拖拽
+        if(objName == PREFIX + "btn_move")
+        {
+            // 获取当前鼠标位置（通过ChartGetInteger获取最后鼠标位置）
+            int mouseX = (int)ChartGetInteger(0, CHART_MOUSE_X);
+            int mouseY = (int)ChartGetInteger(0, CHART_MOUSE_Y);
+            g_dragging = true;
+            g_dragOffsetX = mouseX - g_panelX;
+            g_dragOffsetY = mouseY - g_panelY;
+            ObjectSetInteger(0, objName, OBJPROP_STATE, false);
+            return;
+        }
+
         // TAB切换
         for(int i=0; i<TAB_COUNT; i++)
         {
@@ -2256,11 +2358,38 @@ void OnChartEvent(const int id,
         }
     }
 
-    // 鼠标移动事件（用于面板拖拽，简化实现）
+    // 鼠标移动事件（拖拽面板）
     if(id == CHARTEVENT_MOUSE_MOVE)
     {
-        // 简化：不实现拖拽，面板位置固定
+        int mouseX = (int)lparam;
+        int mouseY = (int)dparam;
+        int mouseBtn = (int)StringToInteger(sparam);
+
+        if(g_dragging)
+        {
+            // 左键松开则停止拖拽
+            if((mouseBtn & 1) == 0)
+            {
+                g_dragging = false;
+                // 重置移动按钮状态
+                string btnName = PREFIX + "btn_move";
+                if(ObjectFind(btnName) >= 0)
+                    ObjectSetInteger(0, btnName, OBJPROP_STATE, false);
+            }
+            else
+            {
+                // 更新面板位置
+                int newX = mouseX - g_dragOffsetX;
+                int newY = mouseY - g_dragOffsetY;
+                if(newX < 0) newX = 0;
+                if(newY < 0) newY = 0;
+                g_panelX = newX;
+                g_panelY = newY;
+                DrawPanel();
+            }
+        }
     }
+
 }
 
 //==========================================================================
