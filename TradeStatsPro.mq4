@@ -1,2715 +1,1826 @@
 //+------------------------------------------------------------------+
-//|                                              TradeStatsPro.mq4   |
-//|                          MT4收益统计指标 - 每笔交易统计专业版      |
-//|                  支持CSV持久化，历史数据不依赖MT4客户端记录         |
+//|  TradeStatsPro.mq4                                               |
+//|  MT4收益统计指标 - 支持CSV持久化，每日增量写入                      |
 //+------------------------------------------------------------------+
-#property copyright   "TradeStatsPro"
-#property link        ""
-#property version     "1.00"
-#property strict
+#property copyright "TradeStatsPro"
+#property link      ""
+#property version   "2.0"
 #property indicator_chart_window
-#property indicator_buffers 1
-#property indicator_color1  clrBlack
-
-//--- 指标缓冲区（虚拟，用于触发重绘）
-double DummyBuffer[];
+#property indicator_plots 0
 
 //==========================================================================
 // 输入参数
 //==========================================================================
-
-// 面板位置
-input string  _sep0_              = "___________面板位置___________";
-input int     PanelStartX         = 100;       // 面板_X默认值
-input int     PanelStartY         = 0;         // 面板_Y默认值
-input string  CustomTitle         = "MT4统计每一笔交易"; // 自定义title
-
-// 刷新与统计时间
-input string  _sep1_              = "___________刷新与时间___________";
-input int     RefreshMinutes      = 5;         // 刷新UI界面时间间隔(分钟)
-input datetime StartTime          = 0;         // 开始统计时间(0=不限)
-input datetime EndTime            = 0;         // 结束统计时间(0=不限)
-
-// 过滤条件
-input string  _sep2_              = "___________过滤条件___________";
-input string  FilterSymbols       = "";        // 只统计品种(逗号分隔，空=全部)
-input string  FilterMagic         = "";        // 只统计magic(逗号分隔，空=全部)
-input string  FilterComment       = "";        // 只统计备注包含文字
-input int     FilterOrderType     = 0;         // 只统计订单类型: 0=ALL, 1=BUY, 2=SELL
-
-// CSV持久化
-input string  _sep3_              = "___________CSV持久化___________";
-input int     CSV_DaysBack        = 1;         // 写入多少天前的数据(默认1=昨天)
-input bool    CSV_AutoSave        = true;      // 自动保存CSV
-input string  CSV_FileName        = "TradeStats_History.csv"; // CSV文件名
-
-// 显示列控制
-input string  _sep4_              = "___________UI显示列选择___________";
-input bool    Show_Lots           = true;      // 显示_手数
-input bool    Show_MaxLots        = true;      // 显示_最大手数
-input bool    Show_Count          = true;      // 显示_交易次数
-input bool    Show_Profit         = true;      // 显示_盈亏金额
-input bool    Show_ProfitPct      = true;      // 显示_盈亏百分比
-input bool    Show_Commission     = true;      // 显示_手续费
-input bool    Show_Swap           = true;      // 显示_库存费
-input bool    Show_Deposit        = true;      // 显示_出入金
-input bool    Show_Balance        = true;      // 显示_余额
-input bool    Show_MaxDD          = true;      // 显示_最大浮亏
-input bool    Show_MaxDDPct       = true;      // 显示_最大浮亏比例
-input bool    Show_MaxFloat       = true;      // 显示_最大浮盈金额
-input bool    Show_MaxFloatPct    = true;      // 显示_最大浮盈比例
-input bool    Show_HoldTime       = true;      // 显示_平均最大持仓时间
-input bool    Show_WinRate        = true;      // 显示_胜率
-input bool    Show_ProfitFactor   = true;      // 显示_盈亏比
-input bool    Show_TrailButton    = true;      // 显示路径按钮可用
-input bool    ForceShowPath       = false;     // 载入时_强制_显示路径
-input bool    ForceMinimize       = false;     // 载入时_强制_最小化状态
-
-// 字体与颜色
-input string  _sep5_              = "___________字体与颜色___________";
-input int     FontSize            = 8;         // 字体大小
-input color   ColorGreen          = clrSpringGreen;  // 颜色_文字_绿色
-input color   ColorRed            = clrRed;          // 颜色_文字_红色
-input color   ColorGray           = clrLightSteelBlue; // 颜色_文字_灰白
-input color   ColorDimGray        = clrDimGray;      // 颜色_文字_深灰
-input color   ColorBG             = C'20,20,30';     // 背景颜色
-input color   ColorBorder         = C'50,50,70';     // 边框颜色
-input color   ColorHeader         = C'30,30,50';     // 表头颜色
-input color   ColorRowOdd         = C'15,15,25';     // 奇数行颜色
-input color   ColorRowEven        = C'20,20,35';     // 偶数行颜色
-input color   ColorEquityLine     = clrDodgerBlue;   // 净值曲线颜色
-
-// 综合视图参数
-input string  _sep6_              = "___________综合视图___________";
-input string  DefaultTab          = "综";      // 默认打开TAB页
-input int     Summary_DayCount    = 7;         // 综合中显示中DAY显示N天
-input bool    Summary_ShowOpen    = true;      // 综合中显示多空汇总
-
-// 各维度统计数量
-input string  _sep7_              = "___________各维度统计数量___________";
-input int     Day_Count           = 100;       // DAY统计N天
-input bool    Day_ShowEmpty       = false;     // DAY无交易记录也是否显示
-input int     Week_Count          = 200;       // WEEK统计N周
-input bool    Week_ShowEmpty      = false;     // WEEK无交易记录也是否显示
-input int     Month_Count         = 100;       // MONTH统计N个月
-input bool    Month_ShowEmpty     = false;     // MONTH无交易记录也是否显示
-input int     Quarter_Count       = 100;       // QUARTER统计N个季度
-input bool    Quarter_ShowEmpty   = false;     // QUARTER无交易记录也是否显示
-input int     Year_Count          = 20;        // YEAR统计N年
-input bool    Year_ShowEmpty      = false;     // YEAR无交易记录也是否显示
-
-// 路径颜色
-input string  _sep8_              = "___________路径颜色___________";
-input color   TrailColor_Buy      = clrRoyalBlue;    // 路径颜色_buy
-input color   TrailColor_BuyAvg   = clrGoldenrod;    // 路径颜色_buy平仓箭头
-input color   TrailColor_Sell     = clrRed;          // 路径颜色_sell开仓和线段
-input color   TrailColor_SellAvg  = clrViolet;       // 路径颜色_sell平仓箭头
-input color   TrailColor_Pending  = clrGray;         // 路径颜色_未成交的挂单
-
-// 其他
-input bool    UseSound            = false;     // 使用声音提示
+input bool   CSV_AutoSave    = true;    // 启用CSV自动保存
+input int    CSV_DaysBack    = 1;       // 写入几天前的数据(1=昨天)
+input string Only_Magic      = "";      // 只统计指定Magic(逗号分隔,空=全部)
+input string Only_Symbol     = "";      // 只统计指定品种(空=全部)
+input string Default_Tab     = "综";    // 默认标签页
+input int    Day_Count       = 100;     // 日统计显示天数
+input int    Week_Count      = 200;     // 周统计显示周数
+input int    Month_Count     = 100;     // 月统计显示月数
+input int    Quarter_Count   = 40;      // 季度统计显示数
+input int    Year_Count      = 20;      // 年统计显示数
+input bool   Day_ShowEmpty   = false;   // 日统计显示空行
+input bool   Week_ShowEmpty  = false;   // 周统计显示空行
+input bool   Month_ShowEmpty = false;   // 月统计显示空行
+input bool   Quarter_ShowEmpty = false; // 季度统计显示空行
+input bool   Year_ShowEmpty  = false;   // 年统计显示空行
+input int    FontSize        = 8;       // 字体大小
+input string FontName        = "Consolas"; // 字体
+input color  ColorProfit     = clrLime;    // 盈利颜色
+input color  ColorLoss       = clrRed;    // 亏损颜色
+input color  ColorHeader     = clrYellow; // 表头颜色
+input color  ColorNeutral    = clrWhite;  // 中性颜色
+input color  ColorLabel      = clrSilver; // 标签颜色
+input color  ColorBg         = C'20,20,30'; // 背景颜色
+input color  ColorTitle      = clrDarkSlateGray; // 标题栏颜色
+input color  ColorTab        = C'30,30,50'; // 标签栏颜色
+input color  ColorTabActive  = C'0,80,150'; // 激活标签颜色
+input color  ColorCurve      = clrDodgerBlue; // 曲线颜色
+input int    Panel_X         = 0;       // 面板X坐标
+input int    Panel_Y         = 20;      // 面板Y坐标
+input int    Panel_Width     = 1200;    // 面板宽度
 
 //==========================================================================
-// 全局变量
+// 常量
 //==========================================================================
-
-// 面板状态
-int    g_panelX        = 0;
-int    g_panelY        = 0;
-bool   g_minimized     = false;
-string g_currentTab    = "综";
-datetime g_lastRefresh = 0;
-int    g_chartW        = 0;
-int    g_chartH        = 0;
-
-// 面板拖拽状态
-bool   g_dragging      = false;
-int    g_dragOffsetX   = 0;
-int    g_dragOffsetY   = 0;
-int    g_lastMouseX    = 0;   // 最后一次鼠标X位置
-int    g_lastMouseY    = 0;   // 最后一次鼠标Y位置
-
-// 当前选中的行（用于轨迹显示）
-int    g_selectedRow   = -1;
-string g_selectedPeriod = "";
-
-// 对象名称前缀
-string PREFIX = "TSP_";
-
-// 面板尺寸
-int PANEL_W    = 900;
-int PANEL_H    = 400;
-int TITLE_H    = 22;
-int TAB_H      = 20;
-int HEADER_H   = 18;
-int ROW_H      = 16;
-int CHART_H    = 120;
-int BOTTOM_H   = 40;
-
-// Tab列表
-string TABS[] = {"综","日","周","月","季","年","币","M","备","账户","轨迹"};
-int    TAB_COUNT = 11;
+#define MAX_TRADES   50000
+#define MAX_STATS    2000
+#define MAX_DEPOSITS 1000
+#define TITLE_H      20
+#define TAB_H        20
+#define ROW_H        14
+#define CHART_H_FULL 120
+#define COL_WIDTHS_COUNT 18
 
 //==========================================================================
 // 数据结构
 //==========================================================================
-
-// 单笔交易记录
-struct TradeRecord
+struct TradeRec
 {
     int      ticket;
     string   symbol;
-    int      type;       // 0=buy, 1=sell
+    int      type;       // 0=buy,1=sell
     double   lots;
     datetime openTime;
-    double   openPrice;
     datetime closeTime;
+    double   openPrice;
     double   closePrice;
     double   profit;
     double   commission;
     double   swap;
-    double   stopLoss;
-    double   takeProfit;
+    double   openEquity;  // 开仓时净值(用于最大浮亏计算)
     int      magic;
     string   comment;
-    double   maxProfit;  // 持仓期间最大浮盈
-    double   maxLoss;    // 持仓期间最大浮亏
+    double   maxDD;       // 最大浮亏
+    double   maxProfit;   // 最大浮盈
 };
 
-// 出入金记录
-struct DepositRecord
+struct DepositRec
 {
-    datetime time;    // 时间
-    double   amount;  // 金额（正=入金，负=出金）
+    datetime time;
+    double   amount;
+    int      ticket;
 };
 
-// 统计汇总结构
-struct StatSummary
+struct StatRow
 {
-    string   label;          // 标签（日期/周/月等）
-    double   totalLots;      // 总手数
-    double   minLots;        // 最小手数
-    double   maxLots;        // 最大手数
-    int      count;          // 交易次数
-    double   profit;         // 盈亏金额
-    double   profitPct;      // 盈亏百分比
-    double   commission;     // 手续费
-    double   swap;           // 库存费
-    double   deposit;        // 出入金（净）
-    double   balance;        // 余额
-    double   maxDD;          // 最大浮亏
-    double   maxDDPct;       // 最大浮亏比例
-    double   maxFloat;       // 最大浮盈
-    double   maxFloatPct;    // 最大浮盈比例
-    int      winCount;       // 盈利次数
-    int      lossCount;      // 亏损次数
-    double   totalWin;       // 总盈利
-    double   totalLoss;      // 总亏损
-    double   minHoldSec;     // 最小持仓时间(秒)
-    double   avgHoldSec;     // 平均持仓时间(秒)
-    double   maxHoldSec;     // 最大持仓时间(秒)
-    double   winRate;        // 胜率
-    double   profitFactor;   // 盈亏比
-    bool     isOpen;         // 是否为持仓行
+    string   label;
+    double   lots;
+    double   minLots;
+    double   maxLots;
+    int      count;
+    double   profit;      // 净盈亏(含手续费库存费)
+    double   rawProfit;   // 纯盈亏
+    double   pct;         // 百分比
+    double   commission;
+    double   swap;
+    double   deposit;     // 出入金
+    double   balance;     // 期末余额
+    double   maxDD;       // 最大浮亏
+    double   maxDDPct;
+    double   maxProfit;   // 最大浮盈
+    double   maxProfitPct;
+    int      minDuration; // 秒
+    int      avgDuration;
+    int      maxDuration;
+    int      winCount;
+    double   winProfit;
+    double   lossProfit;
+    double   winRate;
+    double   plRatio;
+    int      winCountW;   // 胜(含手续费)
 };
-
-// 最大数组大小
-#define MAX_TRADES    5000
-#define MAX_STATS     500
-#define MAX_CSV_ROWS  10000
-
-// 全局交易数组
-TradeRecord g_trades[];
-int         g_tradeCount = 0;
-
-// CSV已保存的交易（按ticket）
-int         g_csvTickets[];
-int         g_csvTicketCount = 0;
-
-// 各维度统计结果
-StatSummary g_dayStat[];
-int         g_dayCount = 0;
-StatSummary g_weekStat[];
-int         g_weekCount = 0;
-StatSummary g_monthStat[];
-int         g_monthCount = 0;
-StatSummary g_quarterStat[];
-int         g_quarterCount = 0;
-StatSummary g_yearStat[];
-int         g_yearCount = 0;
-StatSummary g_symbolStat[];
-int         g_symbolCount = 0;
-StatSummary g_magicStat[];
-int         g_magicCount = 0;
-StatSummary g_commentStat[];
-int         g_commentCount = 0;
-
-// 出入金记录
-DepositRecord g_deposits[];
-int           g_depositCount = 0;
-
-// 净值曲线数据
-double g_equityCurve[];
-datetime g_equityTime[];
-int    g_equityCount = 0;
 
 //==========================================================================
-// 辅助函数：字符串分割
+// 全局变量
 //==========================================================================
-int StringSplit(string str, string sep, string &result[])
+TradeRec   g_trades[];
+int        g_tradeCount = 0;
+DepositRec g_deposits[];
+int        g_depositCount = 0;
+
+// 各维度统计数组
+StatRow g_dayStat[];    int g_dayCount = 0;
+StatRow g_weekStat[];   int g_weekCount = 0;
+StatRow g_monthStat[];  int g_monthCount = 0;
+StatRow g_quarterStat[];int g_quarterCount = 0;
+StatRow g_yearStat[];   int g_yearCount = 0;
+StatRow g_symbolStat[]; int g_symbolCount = 0;
+StatRow g_magicStat[];  int g_magicCount = 0;
+StatRow g_commentStat[];int g_commentCount = 0;
+
+// 综合视图汇总
+StatRow g_weekSum, g_monthSum, g_quarterSum, g_yearSum, g_totalSum;
+StatRow g_holdingSum, g_buySum, g_sellSum;
+
+// 面板状态
+int    g_panelX = 0;
+int    g_panelY = 20;
+bool   g_minimized = false;
+string g_activeTab = "综";
+int    g_scrollOffset = 0;
+
+// 拖动状态
+bool   g_dragging = false;
+int    g_dragStartX = 0;
+int    g_dragStartY = 0;
+int    g_dragPanelX = 0;
+int    g_dragPanelY = 0;
+int    g_lastMouseX = 0;
+int    g_lastMouseY = 0;
+
+// 上次刷新时间
+datetime g_lastRefresh = 0;
+datetime g_lastSave = 0;
+
+// 列宽配置(像素)
+int g_colW[COL_WIDTHS_COUNT];
+
+// 曲线数据
+double g_curveVals[];
+string g_curveLabels[];
+int    g_curveCount = 0;
+
+// Magic筛选列表
+int    g_filterMagic[];
+int    g_filterMagicCount = 0;
+string g_filterSymbol = "";
+
+// 对象名前缀
+string g_prefix = "TSP_";
+
+//==========================================================================
+// 工具函数
+//==========================================================================
+string IntToStr(int v) { return IntegerToString(v); }
+
+string FormatLots(double v)
 {
-    int count = 0;
-    string s = str;
-    while(StringLen(s) > 0)
-    {
-        int pos = StringFind(s, sep);
-        if(pos < 0)
-        {
-            if(StringLen(StringTrimLeft(StringTrimRight(s))) > 0)
-            {
-                ArrayResize(result, count+1);
-                result[count] = StringTrimLeft(StringTrimRight(s));
-                count++;
-            }
-            break;
-        }
-        string part = StringSubstr(s, 0, pos);
-        if(StringLen(StringTrimLeft(StringTrimRight(part))) > 0)
-        {
-            ArrayResize(result, count+1);
-            result[count] = StringTrimLeft(StringTrimRight(part));
-            count++;
-        }
-        s = StringSubstr(s, pos + StringLen(sep));
-    }
-    return count;
+    return DoubleToString(v, 2);
 }
 
-//==========================================================================
-// 辅助函数：检查过滤条件
-//==========================================================================
-bool PassFilter(string symbol, int magic, string comment, int orderType)
+string FormatMoney(double v)
 {
-    // 品种过滤
-    if(StringLen(FilterSymbols) > 0)
+    if(MathAbs(v) >= 1000000) return DoubleToString(v/1000000.0, 2) + "M";
+    if(MathAbs(v) >= 10000)   return DoubleToString(v, 0);
+    return DoubleToString(v, 2);
+}
+
+string FormatPct(double v)
+{
+    return DoubleToString(v*100.0, 2) + " %";
+}
+
+string FormatDuration(int secs)
+{
+    if(secs < 0) secs = 0;
+    int d = secs / 86400;
+    int h = (secs % 86400) / 3600;
+    int m = (secs % 3600) / 60;
+    int s = secs % 60;
+    return StringFormat("%d:%02d:%02d:%02d", d, h, m, s);
+}
+
+string FormatMinMaxDuration(int mn, int avg, int mx)
+{
+    return FormatDuration(mn) + "|" + FormatDuration(avg) + "|" + FormatDuration(mx);
+}
+
+color ProfitColor(double v)
+{
+    if(v > 0) return ColorProfit;
+    if(v < 0) return ColorLoss;
+    return ColorNeutral;
+}
+
+bool PassFilter(int magic, string symbol)
+{
+    if(g_filterMagicCount > 0)
     {
-        string syms[];
-        int n = StringSplit(FilterSymbols, ",", syms);
-        bool found = false;
-        for(int i=0; i<n; i++)
-            if(syms[i] == symbol) { found = true; break; }
-        if(!found) return false;
+        bool ok = false;
+        for(int i=0; i<g_filterMagicCount; i++)
+            if(g_filterMagic[i] == magic) { ok = true; break; }
+        if(!ok) return false;
     }
-    // Magic过滤
-    if(StringLen(FilterMagic) > 0)
-    {
-        string mags[];
-        int n = StringSplit(FilterMagic, ",", mags);
-        bool found = false;
-        for(int i=0; i<n; i++)
-            if(StrToInteger(mags[i]) == magic) { found = true; break; }
-        if(!found) return false;
-    }
-    // 备注过滤
-    if(StringLen(FilterComment) > 0)
-        if(StringFind(comment, FilterComment) < 0) return false;
-    // 订单类型过滤
-    if(FilterOrderType == 1 && orderType != OP_BUY) return false;
-    if(FilterOrderType == 2 && orderType != OP_SELL) return false;
+    if(g_filterSymbol != "" && symbol != g_filterSymbol) return false;
     return true;
 }
 
-//==========================================================================
-// 辅助函数：格式化时间为字符串
-//==========================================================================
-string FormatTime(double seconds)
+void ParseMagicFilter()
 {
-    int s = (int)seconds;
-    int h = s / 3600;
-    int m = (s % 3600) / 60;
-    int sec = s % 60;
-    return StringFormat("%d:%02d:%02d", h, m, sec);
-}
-
-string FormatDate(datetime t)
-{
-    return TimeToStr(t, TIME_DATE);
-}
-
-string FormatDateTime(datetime t)
-{
-    return TimeToStr(t, TIME_DATE|TIME_MINUTES|TIME_SECONDS);
+    g_filterMagicCount = 0;
+    if(Only_Magic == "") return;
+    string parts[];
+    int n = StringSplit(Only_Magic, ',', parts);
+    ArrayResize(g_filterMagic, n);
+    for(int i=0; i<n; i++)
+    {
+        StringTrimLeft(parts[i]);
+        StringTrimRight(parts[i]);
+        if(parts[i] != "")
+        {
+            g_filterMagic[g_filterMagicCount] = (int)StringToInteger(parts[i]);
+            g_filterMagicCount++;
+        }
+    }
 }
 
 //==========================================================================
-// 辅助函数：颜色值
-//==========================================================================
-color GetProfitColor(double val)
-{
-    if(val > 0) return ColorGreen;
-    if(val < 0) return ColorRed;
-    return ColorGray;
-}
-
-//==========================================================================
-// CSV文件路径
+// CSV路径
 //==========================================================================
 string GetCSVPath()
 {
-    return TerminalPath() + "\\MQL4\\Files\\" + CSV_FileName;
+    return "TradeStats_" + IntegerToString(AccountNumber()) + ".csv";
 }
 
 //==========================================================================
-// 初始化空的StatSummary
+// CSV写入
 //==========================================================================
-void InitStat(StatSummary &s)
-{
-    s.label        = "";
-    s.totalLots    = 0;
-    s.minLots      = 999999;
-    s.maxLots      = 0;
-    s.count        = 0;
-    s.profit       = 0;
-    s.profitPct    = 0;
-    s.commission   = 0;
-    s.swap         = 0;
-    s.deposit      = 0;
-    s.balance      = 0;
-    s.maxDD        = 0;
-    s.maxDDPct     = 0;
-    s.maxFloat     = 0;
-    s.maxFloatPct  = 0;
-    s.winCount     = 0;
-    s.lossCount    = 0;
-    s.totalWin     = 0;
-    s.totalLoss    = 0;
-    s.minHoldSec   = 999999999;
-    s.avgHoldSec   = 0;
-    s.maxHoldSec   = 0;
-    s.winRate      = 0;
-    s.profitFactor = 0;
-    s.isOpen       = false;
-}
-
-//==========================================================================
-// 将一笔交易累加到统计结构
-//==========================================================================
-void AccumTrade(StatSummary &s, TradeRecord &t, double baseBalance)
-{
-    s.count++;
-    s.totalLots += t.lots;
-    if(t.lots < s.minLots) s.minLots = t.lots;
-    if(t.lots > s.maxLots) s.maxLots = t.lots;
-    s.profit     += t.profit;
-    s.commission += t.commission;
-    s.swap       += t.swap;
-
-    if(t.profit > 0) { s.winCount++; s.totalWin += t.profit; }
-    else if(t.profit < 0) { s.lossCount++; s.totalLoss += MathAbs(t.profit); }
-
-    double holdSec = (double)(t.closeTime - t.openTime);
-    if(holdSec < s.minHoldSec) s.minHoldSec = holdSec;
-    if(holdSec > s.maxHoldSec) s.maxHoldSec = holdSec;
-    s.avgHoldSec += holdSec;
-
-    if(t.maxLoss < s.maxDD) s.maxDD = t.maxLoss;
-    if(t.maxProfit > s.maxFloat) s.maxFloat = t.maxProfit;
-}
-
-//==========================================================================
-// 完成统计结构计算（在所有交易累加后调用）
-//==========================================================================
-void FinalizeStat(StatSummary &s, double baseBalance)
-{
-    if(s.count > 0)
-    {
-        s.avgHoldSec /= s.count;
-        s.winRate = (s.winCount + s.lossCount > 0) ?
-            (double)s.winCount / (s.winCount + s.lossCount) * 100.0 : 0;
-        s.profitFactor = (s.totalLoss > 0) ? s.totalWin / s.totalLoss : 0;
-        if(s.minLots >= 999999) s.minLots = 0;
-        if(s.minHoldSec >= 999999999) s.minHoldSec = 0;
-    }
-    if(baseBalance > 0)
-    {
-        s.profitPct = s.profit / baseBalance * 100.0;
-        if(s.maxDD < 0) s.maxDDPct = s.maxDD / baseBalance * 100.0;
-        if(s.maxFloat > 0) s.maxFloatPct = s.maxFloat / baseBalance * 100.0;
-    }
-}
-
-
-//==========================================================================
-// CSV 持久化：读取已保存的交易记录
-//==========================================================================
-void CSV_LoadHistory()
-{
-    g_tradeCount = 0;
-    ArrayResize(g_trades, MAX_TRADES);
-    g_csvTicketCount = 0;
-    ArrayResize(g_csvTickets, MAX_CSV_ROWS);
-
-    int fh = FileOpen(CSV_FileName, FILE_READ|FILE_CSV|FILE_ANSI, ',');
-    if(fh == INVALID_HANDLE) return;
-
-    // 跳过表头
-    if(!FileIsEnding(fh)) FileReadString(fh); // ticket
-    if(!FileIsEnding(fh)) FileReadString(fh); // symbol
-    if(!FileIsEnding(fh)) FileReadString(fh); // type
-    if(!FileIsEnding(fh)) FileReadString(fh); // lots
-    if(!FileIsEnding(fh)) FileReadString(fh); // openTime
-    if(!FileIsEnding(fh)) FileReadString(fh); // openPrice
-    if(!FileIsEnding(fh)) FileReadString(fh); // closeTime
-    if(!FileIsEnding(fh)) FileReadString(fh); // closePrice
-    if(!FileIsEnding(fh)) FileReadString(fh); // profit
-    if(!FileIsEnding(fh)) FileReadString(fh); // commission
-    if(!FileIsEnding(fh)) FileReadString(fh); // swap
-    if(!FileIsEnding(fh)) FileReadString(fh); // stopLoss
-    if(!FileIsEnding(fh)) FileReadString(fh); // takeProfit
-    if(!FileIsEnding(fh)) FileReadString(fh); // magic
-    if(!FileIsEnding(fh)) FileReadString(fh); // comment
-    if(!FileIsEnding(fh)) FileReadString(fh); // maxProfit
-    if(!FileIsEnding(fh)) FileReadString(fh); // maxLoss
-
-    while(!FileIsEnding(fh) && g_tradeCount < MAX_TRADES)
-    {
-        string sTicket     = FileReadString(fh);
-        if(FileIsEnding(fh) || StringLen(sTicket) == 0) break;
-        string sSymbol     = FileReadString(fh);
-        string sType       = FileReadString(fh);
-        string sLots       = FileReadString(fh);
-        string sOpenTime   = FileReadString(fh);
-        string sOpenPrice  = FileReadString(fh);
-        string sCloseTime  = FileReadString(fh);
-        string sClosePrice = FileReadString(fh);
-        string sProfit     = FileReadString(fh);
-        string sComm       = FileReadString(fh);
-        string sSwap       = FileReadString(fh);
-        string sSL         = FileReadString(fh);
-        string sTP         = FileReadString(fh);
-        string sMagic      = FileReadString(fh);
-        string sComment    = FileReadString(fh);
-        string sMaxProfit  = FileReadString(fh);
-        string sMaxLoss    = FileReadString(fh);
-
-        TradeRecord tr;
-        tr.ticket     = (int)StringToInteger(sTicket);
-        tr.symbol     = sSymbol;
-        tr.type       = (int)StringToInteger(sType);
-        tr.lots       = StringToDouble(sLots);
-        tr.openTime   = (datetime)StringToInteger(sOpenTime);
-        tr.openPrice  = StringToDouble(sOpenPrice);
-        tr.closeTime  = (datetime)StringToInteger(sCloseTime);
-        tr.closePrice = StringToDouble(sClosePrice);
-        tr.profit     = StringToDouble(sProfit);
-        tr.commission = StringToDouble(sComm);
-        tr.swap       = StringToDouble(sSwap);
-        tr.stopLoss   = StringToDouble(sSL);
-        tr.takeProfit = StringToDouble(sTP);
-        tr.magic      = (int)StringToInteger(sMagic);
-        tr.comment    = sComment;
-        tr.maxProfit  = StringToDouble(sMaxProfit);
-        tr.maxLoss    = StringToDouble(sMaxLoss);
-
-        g_trades[g_tradeCount] = tr;
-        g_tradeCount++;
-
-        // 记录已保存的ticket
-        g_csvTickets[g_csvTicketCount] = tr.ticket;
-        g_csvTicketCount++;
-    }
-    FileClose(fh);
-    Print("CSV加载完成，共", g_tradeCount, "条记录");
-}
-
-//==========================================================================
-// 检查ticket是否已在CSV中
-//==========================================================================
-bool CSV_HasTicket(int ticket)
-{
-    for(int i=0; i<g_csvTicketCount; i++)
-        if(g_csvTickets[i] == ticket) return true;
-    return false;
-}
-
-//==========================================================================
-// CSV 持久化：增量写入新的交易记录
-// 写入 CSV_DaysBack 天前（及更早）已平仓的交易
-//==========================================================================
-void CSV_SaveIncremental()
+// CSV格式: ticket,symbol,type,lots,openTime,closeTime,openPrice,closePrice,profit,commission,swap,magic,comment
+void SaveToCSV()
 {
     if(!CSV_AutoSave) return;
-
+    
+    string path = GetCSVPath();
+    
+    // 先读取已有ticket集合
+    int existTickets[];
+    int existCount = 0;
+    ArrayResize(existTickets, MAX_TRADES);
+    
+    int fh = FileOpen(path, FILE_READ|FILE_CSV|FILE_ANSI, ',');
+    if(fh != INVALID_HANDLE)
+    {
+        while(!FileIsEnding(fh))
+        {
+            string line = FileReadString(fh);
+            if(line == "") { FileReadString(fh); continue; } // skip rest of line
+            // read rest of columns to advance
+            for(int c=1; c<13; c++) FileReadString(fh);
+            int tk = (int)StringToInteger(line);
+            if(tk > 0 && existCount < MAX_TRADES)
+            {
+                existTickets[existCount] = tk;
+                existCount++;
+            }
+        }
+        FileClose(fh);
+    }
+    
+    // 计算写入截止时间
     datetime cutoff = TimeCurrent() - (datetime)(CSV_DaysBack * 86400);
-    // 向前取到当天凌晨0点
+    // 写入当天00:00:00
     cutoff = cutoff - cutoff % 86400;
-
-    // 检查是否有新记录需要写入
-    bool hasNew = false;
-    int total = OrdersHistoryTotal();
-    for(int i=0; i<total; i++)
+    
+    // 追加新记录
+    fh = FileOpen(path, FILE_WRITE|FILE_READ|FILE_CSV|FILE_ANSI, ',');
+    if(fh == INVALID_HANDLE) return;
+    FileSeek(fh, 0, SEEK_END);
+    
+    int written = 0;
+    for(int i=0; i<g_tradeCount; i++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-        if(OrderCloseTime() >= cutoff) continue;
-        if(!PassFilter(OrderSymbol(), OrderMagicNumber(), OrderComment(), OrderType())) continue;
-        if(!CSV_HasTicket(OrderTicket())) { hasNew = true; break; }
-    }
-    if(!hasNew) return;
-
-    // 检查文件是否存在（用于判断是否需要写表头）
-    bool fileExists = false;
-    int fhCheck = FileOpen(CSV_FileName, FILE_READ|FILE_CSV|FILE_ANSI, ',');
-    if(fhCheck != INVALID_HANDLE) { fileExists = true; FileClose(fhCheck); }
-
-    // 追加写入
-    int fh = FileOpen(CSV_FileName, FILE_WRITE|FILE_READ|FILE_CSV|FILE_ANSI, ',');
-    if(fh == INVALID_HANDLE)
-    {
-        Print("无法打开CSV文件写入: ", CSV_FileName);
-        return;
-    }
-
-    // 如果文件不存在，写表头
-    if(!fileExists)
-    {
+        if(g_trades[i].closeTime == 0) continue;
+        if(g_trades[i].closeTime >= cutoff) continue; // 只写cutoff之前的
+        
+        // 检查是否已存在
+        bool exists = false;
+        for(int j=0; j<existCount; j++)
+            if(existTickets[j] == g_trades[i].ticket) { exists = true; break; }
+        if(exists) continue;
+        
         FileWrite(fh,
-            "ticket","symbol","type","lots",
-            "openTime","openPrice","closeTime","closePrice",
-            "profit","commission","swap","stopLoss","takeProfit",
-            "magic","comment","maxProfit","maxLoss");
-    }
-    else
-    {
-        // 移到文件末尾
-        FileSeek(fh, 0, SEEK_END);
-    }
-
-    int newCount = 0;
-    for(int i=0; i<total; i++)
-    {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-        if(OrderCloseTime() >= cutoff) continue;
-        if(!PassFilter(OrderSymbol(), OrderMagicNumber(), OrderComment(), OrderType())) continue;
-        if(CSV_HasTicket(OrderTicket())) continue;
-
-        // 写入一行
-        FileWrite(fh,
-            IntegerToString(OrderTicket()),
-            OrderSymbol(),
-            IntegerToString(OrderType()),
-            DoubleToString(OrderLots(), 2),
-            IntegerToString((int)OrderOpenTime()),
-            DoubleToString(OrderOpenPrice(), 5),
-            IntegerToString((int)OrderCloseTime()),
-            DoubleToString(OrderClosePrice(), 5),
-            DoubleToString(OrderProfit(), 2),
-            DoubleToString(OrderCommission(), 2),
-            DoubleToString(OrderSwap(), 2),
-            DoubleToString(OrderStopLoss(), 5),
-            DoubleToString(OrderTakeProfit(), 5),
-            IntegerToString(OrderMagicNumber()),
-            OrderComment(),
-            "0.00",  // maxProfit（无法从历史获取，填0）
-            "0.00"   // maxLoss
+            IntegerToString(g_trades[i].ticket),
+            g_trades[i].symbol,
+            IntegerToString(g_trades[i].type),
+            DoubleToString(g_trades[i].lots, 2),
+            TimeToStr(g_trades[i].openTime, TIME_DATE|TIME_MINUTES|TIME_SECONDS),
+            TimeToStr(g_trades[i].closeTime, TIME_DATE|TIME_MINUTES|TIME_SECONDS),
+            DoubleToString(g_trades[i].openPrice, 5),
+            DoubleToString(g_trades[i].closePrice, 5),
+            DoubleToString(g_trades[i].profit, 2),
+            DoubleToString(g_trades[i].commission, 2),
+            DoubleToString(g_trades[i].swap, 2),
+            IntegerToString(g_trades[i].magic),
+            g_trades[i].comment
         );
-
-        // 同时加入内存数组
-        if(g_tradeCount < MAX_TRADES)
-        {
-            TradeRecord tr;
-            tr.ticket     = OrderTicket();
-            tr.symbol     = OrderSymbol();
-            tr.type       = OrderType();
-            tr.lots       = OrderLots();
-            tr.openTime   = OrderOpenTime();
-            tr.openPrice  = OrderOpenPrice();
-            tr.closeTime  = OrderCloseTime();
-            tr.closePrice = OrderClosePrice();
-            tr.profit     = OrderProfit();
-            tr.commission = OrderCommission();
-            tr.swap       = OrderSwap();
-            tr.stopLoss   = OrderStopLoss();
-            tr.takeProfit = OrderTakeProfit();
-            tr.magic      = OrderMagicNumber();
-            tr.comment    = OrderComment();
-            tr.maxProfit  = 0;
-            tr.maxLoss    = 0;
-            g_trades[g_tradeCount] = tr;
-            g_tradeCount++;
-        }
-
-        // 记录ticket
-        if(g_csvTicketCount < MAX_CSV_ROWS)
-        {
-            g_csvTickets[g_csvTicketCount] = OrderTicket();
-            g_csvTicketCount++;
-        }
-        newCount++;
+        written++;
     }
     FileClose(fh);
-    if(newCount > 0)
-        Print("CSV增量写入完成，新增", newCount, "条记录");
+    
+    if(written > 0)
+        Print("TradeStatsPro: CSV写入 ", written, " 条记录");
 }
 
 //==========================================================================
-// 从 MT4历史记录加载所有数据（不依赖cutoff，读取全部MT4历史）
-// 已在CSV中的记录不重复加载
+// CSV读取
 //==========================================================================
-void LoadRecentFromMT4()
+void LoadFromCSV()
 {
+    string path = GetCSVPath();
+    int fh = FileOpen(path, FILE_READ|FILE_CSV|FILE_ANSI, ',');
+    if(fh == INVALID_HANDLE) return;
+    
+    int loaded = 0;
+    while(!FileIsEnding(fh))
+    {
+        string s_ticket     = FileReadString(fh); if(FileIsEnding(fh)) break;
+        string s_symbol     = FileReadString(fh);
+        string s_type       = FileReadString(fh);
+        string s_lots       = FileReadString(fh);
+        string s_openTime   = FileReadString(fh);
+        string s_closeTime  = FileReadString(fh);
+        string s_openPrice  = FileReadString(fh);
+        string s_closePrice = FileReadString(fh);
+        string s_profit     = FileReadString(fh);
+        string s_commission = FileReadString(fh);
+        string s_swap       = FileReadString(fh);
+        string s_magic      = FileReadString(fh);
+        string s_comment    = FileReadString(fh);
+        
+        int ticket = (int)StringToInteger(s_ticket);
+        if(ticket <= 0) continue;
+        
+        // 检查是否已从MT4加载
+        bool dup = false;
+        for(int i=0; i<g_tradeCount; i++)
+            if(g_trades[i].ticket == ticket) { dup = true; break; }
+        if(dup) continue;
+        
+        if(g_tradeCount >= MAX_TRADES) break;
+        
+        TradeRec r;
+        r.ticket      = ticket;
+        r.symbol      = s_symbol;
+        r.type        = (int)StringToInteger(s_type);
+        r.lots        = StringToDouble(s_lots);
+        r.openTime    = StringToTime(s_openTime);
+        r.closeTime   = StringToTime(s_closeTime);
+        r.openPrice   = StringToDouble(s_openPrice);
+        r.closePrice  = StringToDouble(s_closePrice);
+        r.profit      = StringToDouble(s_profit);
+        r.commission  = StringToDouble(s_commission);
+        r.swap        = StringToDouble(s_swap);
+        r.magic       = (int)StringToInteger(s_magic);
+        r.comment     = s_comment;
+        r.maxDD       = 0;
+        r.maxProfit   = 0;
+        r.openEquity  = 0;
+        
+        if(!PassFilter(r.magic, r.symbol)) continue;
+        
+        g_trades[g_tradeCount] = r;
+        g_tradeCount++;
+        loaded++;
+    }
+    FileClose(fh);
+    if(loaded > 0)
+        Print("TradeStatsPro: 从CSV加载 ", loaded, " 条历史记录");
+}
+
+//==========================================================================
+// 从MT4加载全部历史
+//==========================================================================
+void LoadFromMT4()
+{
+    // 先加载已平仓订单
     int total = OrdersHistoryTotal();
     for(int i=0; i<total; i++)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-        if(!PassFilter(OrderSymbol(), OrderMagicNumber(), OrderComment(), OrderType())) continue;
-        if(CSV_HasTicket(OrderTicket())) continue; // 已在CSV中的跳过，避免重复
+        
+        int type = OrderType();
+        // OP_BUY=0, OP_SELL=1 - 只统计交易订单
+        if(type != OP_BUY && type != OP_SELL) continue;
+        
+        int ticket = OrderTicket();
+        if(!PassFilter(OrderMagicNumber(), OrderSymbol())) continue;
+        
+        // 检查是否已从CSV加载
+        bool dup = false;
+        for(int j=0; j<g_tradeCount; j++)
+            if(g_trades[j].ticket == ticket) { dup = true; break; }
+        if(dup) continue;
+        
         if(g_tradeCount >= MAX_TRADES) break;
-
-        TradeRecord tr;
-        tr.ticket     = OrderTicket();
-        tr.symbol     = OrderSymbol();
-        tr.type       = OrderType();
-        tr.lots       = OrderLots();
-        tr.openTime   = OrderOpenTime();
-        tr.openPrice  = OrderOpenPrice();
-        tr.closeTime  = OrderCloseTime();
-        tr.closePrice = OrderClosePrice();
-        tr.profit     = OrderProfit();
-        tr.commission = OrderCommission();
-        tr.swap       = OrderSwap();
-        tr.stopLoss   = OrderStopLoss();
-        tr.takeProfit = OrderTakeProfit();
-        tr.magic      = OrderMagicNumber();
-        tr.comment    = OrderComment();
-        tr.maxProfit  = 0;
-        tr.maxLoss    = 0;
-        g_trades[g_tradeCount] = tr;
+        
+        TradeRec r;
+        r.ticket      = ticket;
+        r.symbol      = OrderSymbol();
+        r.type        = type;
+        r.lots        = OrderLots();
+        r.openTime    = OrderOpenTime();
+        r.closeTime   = OrderCloseTime();
+        r.openPrice   = OrderOpenPrice();
+        r.closePrice  = OrderClosePrice();
+        r.profit      = OrderProfit();
+        r.commission  = OrderCommission();
+        r.swap        = OrderSwap();
+        r.magic       = OrderMagicNumber();
+        r.comment     = OrderComment();
+        r.maxDD       = 0;
+        r.maxProfit   = 0;
+        r.openEquity  = 0;
+        
+        g_trades[g_tradeCount] = r;
         g_tradeCount++;
     }
-}
-
-//==========================================================================
-// 加载持仓中的订单
-//==========================================================================
-void LoadOpenOrders()
-{
-    int total = OrdersTotal();
-    for(int i=0; i<total; i++)
-    {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-        if(!PassFilter(OrderSymbol(), OrderMagicNumber(), OrderComment(), OrderType())) continue;
-        if(g_tradeCount >= MAX_TRADES) break;
-
-        TradeRecord tr;
-        tr.ticket     = OrderTicket();
-        tr.symbol     = OrderSymbol();
-        tr.type       = OrderType();
-        tr.lots       = OrderLots();
-        tr.openTime   = OrderOpenTime();
-        tr.openPrice  = OrderOpenPrice();
-        tr.closeTime  = 0;  // 未平仓
-        tr.closePrice = 0;
-        tr.profit     = OrderProfit();
-        tr.commission = OrderCommission();
-        tr.swap       = OrderSwap();
-        tr.stopLoss   = OrderStopLoss();
-        tr.takeProfit = OrderTakeProfit();
-        tr.magic      = OrderMagicNumber();
-        tr.comment    = OrderComment();
-        tr.maxProfit  = 0;
-        tr.maxLoss    = 0;
-        g_trades[g_tradeCount] = tr;
-        g_tradeCount++;
-    }
-}
-
-
-//==========================================================================
-// 加载出入金记录（OP_BALANCE=6, OP_CREDIT=7）
-//==========================================================================
-void LoadDeposits()
-{
+    
+    // 加载出入金记录
     g_depositCount = 0;
-    ArrayResize(g_deposits, 1000);
-
-    int total = OrdersHistoryTotal();
     for(int i=0; i<total; i++)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
-        int ot = OrderType();
-        if(ot != 6 && ot != 7) continue; // 只要 OP_BALANCE 和 OP_CREDIT
-        if(g_depositCount >= 1000) break;
-        g_deposits[g_depositCount].time   = OrderOpenTime();
+        int type = OrderType();
+        // OP_BALANCE=6, OP_CREDIT=7
+        if(type != 6 && type != 7) continue;
+        if(g_depositCount >= MAX_DEPOSITS) break;
+        g_deposits[g_depositCount].time   = OrderCloseTime();
         g_deposits[g_depositCount].amount = OrderProfit();
+        g_deposits[g_depositCount].ticket = OrderTicket();
         g_depositCount++;
     }
+    
+    // 加载持仓订单
+    int openTotal = OrdersTotal();
+    for(int i=0; i<openTotal; i++)
+    {
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
+        int type = OrderType();
+        if(type != OP_BUY && type != OP_SELL) continue;
+        if(!PassFilter(OrderMagicNumber(), OrderSymbol())) continue;
+        if(g_tradeCount >= MAX_TRADES) break;
+        
+        TradeRec r;
+        r.ticket      = OrderTicket();
+        r.symbol      = OrderSymbol();
+        r.type        = type;
+        r.lots        = OrderLots();
+        r.openTime    = OrderOpenTime();
+        r.closeTime   = 0; // 持仓
+        r.openPrice   = OrderOpenPrice();
+        r.closePrice  = 0;
+        r.profit      = OrderProfit();
+        r.commission  = OrderCommission();
+        r.swap        = OrderSwap();
+        r.magic       = OrderMagicNumber();
+        r.comment     = OrderComment();
+        r.maxDD       = 0;
+        r.maxProfit   = 0;
+        r.openEquity  = AccountEquity();
+        
+        g_trades[g_tradeCount] = r;
+        g_tradeCount++;
+    }
+}
+
+//==========================================================================
+// 按时间排序（升序）
+//==========================================================================
+void SortTradesByCloseTime()
+{
+    // 简单插入排序，已平仓在前，持仓在后
+    for(int i=1; i<g_tradeCount; i++)
+    {
+        TradeRec key = g_trades[i];
+        datetime kt = (key.closeTime == 0) ? 9999999999 : key.closeTime;
+        int j = i-1;
+        while(j >= 0)
+        {
+            datetime jt = (g_trades[j].closeTime == 0) ? 9999999999 : g_trades[j].closeTime;
+            if(jt <= kt) break;
+            g_trades[j+1] = g_trades[j];
+            j--;
+        }
+        g_trades[j+1] = key;
+    }
+}
+
+//==========================================================================
+// 计算初始余额（从最早记录推算）
+//==========================================================================
+double CalcStartBalance()
+{
+    // 当前余额 = 初始余额 + 所有出入金 + 所有已平仓净盈亏
+    double totalPnL = 0;
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        totalPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+    }
+    double totalDeposit = 0;
+    for(int i=0; i<g_depositCount; i++)
+        totalDeposit += g_deposits[i].amount;
+    
+    double startBal = AccountBalance() - totalPnL - totalDeposit;
+    if(startBal < 0) startBal = 0;
+    return startBal;
+}
+
+//==========================================================================
+// 获取某时间段内的出入金总额
+//==========================================================================
+double GetDepositInRange(datetime t1, datetime t2)
+{
+    double sum = 0;
+    for(int i=0; i<g_depositCount; i++)
+        if(g_deposits[i].time >= t1 && g_deposits[i].time < t2)
+            sum += g_deposits[i].amount;
+    return sum;
+}
+
+//==========================================================================
+// 初始化StatRow
+//==========================================================================
+void InitRow(StatRow &s)
+{
+    s.label      = "";
+    s.lots       = 0;
+    s.minLots    = 1e10;
+    s.maxLots    = 0;
+    s.count      = 0;
+    s.profit     = 0;
+    s.rawProfit  = 0;
+    s.pct        = 0;
+    s.commission = 0;
+    s.swap       = 0;
+    s.deposit    = 0;
+    s.balance    = 0;
+    s.maxDD      = 0;
+    s.maxDDPct   = 0;
+    s.maxProfit  = 0;
+    s.maxProfitPct = 0;
+    s.minDuration = 0x7FFFFFFF;
+    s.avgDuration = 0;
+    s.maxDuration = 0;
+    s.winCount   = 0;
+    s.winCountW  = 0;
+    s.winProfit  = 0;
+    s.lossProfit = 0;
+    s.winRate    = 0;
+    s.plRatio    = 0;
+}
+
+void AccumTrade(StatRow &s, TradeRec &r)
+{
+    s.count++;
+    s.lots      += r.lots;
+    if(r.lots < s.minLots) s.minLots = r.lots;
+    if(r.lots > s.maxLots) s.maxLots = r.lots;
+    
+    double net = r.profit + r.commission + r.swap;
+    s.profit     += net;
+    s.rawProfit  += r.profit;
+    s.commission += r.commission;
+    s.swap       += r.swap;
+    
+    if(r.profit > 0) { s.winCount++; s.winProfit += r.profit; }
+    else             { s.lossProfit += r.profit; }
+    if(net > 0) s.winCountW++;
+    
+    if(r.closeTime > 0 && r.openTime > 0)
+    {
+        int dur = (int)(r.closeTime - r.openTime);
+        if(dur < s.minDuration) s.minDuration = dur;
+        if(dur > s.maxDuration) s.maxDuration = dur;
+        s.avgDuration += dur;
+    }
+}
+
+void FinalizeRow(StatRow &s, double startBal)
+{
+    if(s.count == 0)
+    {
+        s.minLots = 0;
+        s.minDuration = 0;
+        s.avgDuration = 0;
+        return;
+    }
+    if(s.minLots >= 1e9) s.minLots = 0;
+    s.avgDuration = s.avgDuration / s.count;
+    if(s.minDuration == 0x7FFFFFFF) s.minDuration = 0;
+    
+    if(startBal > 0)
+        s.pct = s.profit / startBal;
+    else
+        s.pct = 0;
+    
+    if(s.count > 0)
+        s.winRate = (double)s.winCountW / s.count;
+    
+    double avgWin  = (s.winCount > 0) ? s.winProfit / s.winCount : 0;
+    double lossN   = s.count - s.winCount;
+    double avgLoss = (lossN > 0) ? MathAbs(s.lossProfit / lossN) : 0;
+    s.plRatio = (avgLoss > 0) ? avgWin / avgLoss : 0;
+}
+
+//==========================================================================
+// 时间分组辅助
+//==========================================================================
+string DayKey(datetime t)   { return StringFormat("%04d%02d%02d", TimeYear(t), TimeMonth(t), TimeDay(t)); }
+string WeekKey(datetime t)
+{
+    // ISO周：周一为第一天
+    int dow = TimeDayOfWeek(t); // 0=Sun
+    if(dow == 0) dow = 7;
+    datetime mon = t - (datetime)((dow-1)*86400);
+    mon = mon - mon % 86400;
+    return StringFormat("%04d%02d%02d", TimeYear(mon), TimeMonth(mon), TimeDay(mon));
+}
+string MonthKey(datetime t) { return StringFormat("%04d%02d", TimeYear(t), TimeMonth(t)); }
+string QuarterKey(datetime t)
+{
+    int q = (TimeMonth(t)-1)/3 + 1;
+    return StringFormat("%04dQ%d", TimeYear(t), q);
+}
+string YearKey(datetime t)  { return StringFormat("%04d", TimeYear(t)); }
+
+string DayLabel(datetime t)   { return StringFormat("%04d.%02d.%02d", TimeYear(t), TimeMonth(t), TimeDay(t)); }
+string WeekLabel(datetime t)
+{
+    int dow = TimeDayOfWeek(t);
+    if(dow == 0) dow = 7;
+    datetime mon = t - (datetime)((dow-1)*86400);
+    mon = mon - mon % 86400;
+    datetime sun = mon + (datetime)(6*86400);
+    return StringFormat("%04d.%02d.%02d~%04d.%02d.%02d",
+        TimeYear(mon),TimeMonth(mon),TimeDay(mon),
+        TimeYear(sun),TimeMonth(sun),TimeDay(sun));
+}
+string MonthLabel(datetime t) { return StringFormat("%04d.%02d", TimeYear(t), TimeMonth(t)); }
+string QuarterLabel(datetime t)
+{
+    int q = (TimeMonth(t)-1)/3+1;
+    int sm = (q-1)*3+1, em = q*3;
+    return StringFormat("%04d.%02d~%04d.%02d", TimeYear(t), sm, TimeYear(t), em);
+}
+string YearLabel(datetime t)  { return StringFormat("%04d", TimeYear(t)); }
+
+//==========================================================================
+// 通用分组统计（按key分组）
+//==========================================================================
+void CalcGroupStats(StatRow &outArr[], int &outCount, int maxCount,
+                    bool showEmpty, string mode)
+{
+    outCount = 0;
+    ArrayResize(outArr, MAX_STATS);
+    
+    // 收集所有key（升序）
+    string keys[];
+    datetime keyTimes[]; // 该key的代表时间
+    int kCount = 0;
+    ArrayResize(keys, MAX_STATS);
+    ArrayResize(keyTimes, MAX_STATS);
+    
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        string k = "";
+        if(mode=="day")     k = DayKey(g_trades[i].closeTime);
+        else if(mode=="week")  k = WeekKey(g_trades[i].closeTime);
+        else if(mode=="month") k = MonthKey(g_trades[i].closeTime);
+        else if(mode=="quarter") k = QuarterKey(g_trades[i].closeTime);
+        else if(mode=="year")  k = YearKey(g_trades[i].closeTime);
+        if(k == "") continue;
+        
+        bool found = false;
+        for(int j=0; j<kCount; j++)
+            if(keys[j] == k) { found = true; break; }
+        if(!found && kCount < MAX_STATS)
+        {
+            keys[kCount] = k;
+            keyTimes[kCount] = g_trades[i].closeTime;
+            kCount++;
+        }
+    }
+    
     // 升序排序
-    for(int i=0; i<g_depositCount-1; i++)
-        for(int j=i+1; j<g_depositCount; j++)
-            if(g_deposits[i].time > g_deposits[j].time)
+    for(int i=0; i<kCount-1; i++)
+        for(int j=i+1; j<kCount; j++)
+            if(keys[i] > keys[j])
             {
-                DepositRecord tmp = g_deposits[i];
-                g_deposits[i] = g_deposits[j];
-                g_deposits[j] = tmp;
+                string tk = keys[i]; keys[i]=keys[j]; keys[j]=tk;
+                datetime tt = keyTimes[i]; keyTimes[i]=keyTimes[j]; keyTimes[j]=tt;
             }
-}
-
-// 获取某时间点之前的出入金总和
-double GetDepositBefore(datetime t)
-{
-    double total = 0;
-    for(int i=0; i<g_depositCount; i++)
-        if(g_deposits[i].time < t) total += g_deposits[i].amount;
-    return total;
-}
-
-// 获取某时间段内的出入金总和
-double GetDepositInRange(datetime tFrom, datetime tTo)
-{
-    double total = 0;
-    for(int i=0; i<g_depositCount; i++)
-        if(g_deposits[i].time >= tFrom && g_deposits[i].time < tTo)
-            total += g_deposits[i].amount;
-    return total;
-}
-
-//==========================================================================
-// 统计计算：按日统计
-//==========================================================================
-void CalcDayStats()
-{
-    g_dayCount = 0;
-    ArrayResize(g_dayStat, MAX_STATS);
-
-    // 收集所有日期
-    string dates[];
-    int dateCount = 0;
-    ArrayResize(dates, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
+    
+    // 计算运行余额（升序）
+    double startBal = CalcStartBalance();
+    double runBal = startBal;
+    double endBals[];
+    double depAmts[];
+    ArrayResize(endBals, kCount);
+    ArrayResize(depAmts, kCount);
+    
+    for(int ki=0; ki<kCount; ki++)
     {
-        if(g_trades[i].closeTime == 0) continue;
-        string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
-        bool found = false;
-        for(int j=0; j<dateCount; j++)
-            if(dates[j] == d) { found = true; break; }
-        if(!found && dateCount < MAX_STATS)
-        {
-            dates[dateCount] = d;
-            dateCount++;
-        }
-    }
-
-    // 升序排序（用于计算运行余额）
-    for(int i=0; i<dateCount-1; i++)
-        for(int j=i+1; j<dateCount; j++)
-            if(dates[i] > dates[j]) { string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp; }
-
-    // 计算每天结束时的运行余额（按升序日期累计）
-    // 初始余额 = 当前账户余额 - 所有已关闭交易的盈亏之和 - 所有出入金
-    double totalClosedPnL = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-    }
-    double totalDeposits = 0;
-    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
-    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
-    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = 1;
-
-    // 按升序计算每天结束余额（包含当天出入金）
-    double dayEndBalance[];
-    ArrayResize(dayEndBalance, dateCount);
-    double runBal = startBalance;
-    for(int di=0; di<dateCount; di++)
-    {
-        // 当天的出入金
-        datetime dayStart = StringToTime(dates[di]);
-        datetime dayEnd   = dayStart + 86400;
-        runBal += GetDepositInRange(dayStart, dayEnd);
-        // 当天的交易盈亏
+        // 该期出入金
+        datetime t1, t2;
+        GetPeriodRange(mode, keyTimes[ki], t1, t2);
+        double dep = GetDepositInRange(t1, t2);
+        depAmts[ki] = dep;
+        runBal += dep;
+        
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
-            if(d != dates[di]) continue;
+            string k = "";
+            if(mode=="day")     k = DayKey(g_trades[i].closeTime);
+            else if(mode=="week")  k = WeekKey(g_trades[i].closeTime);
+            else if(mode=="month") k = MonthKey(g_trades[i].closeTime);
+            else if(mode=="quarter") k = QuarterKey(g_trades[i].closeTime);
+            else if(mode=="year")  k = YearKey(g_trades[i].closeTime);
+            if(k != keys[ki]) continue;
             runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
-        dayEndBalance[di] = runBal;
+        endBals[ki] = runBal;
     }
-
-    // 降序排序日期（最新的在前）
-    for(int i=0; i<dateCount-1; i++)
-        for(int j=i+1; j<dateCount; j++)
-            if(dates[i] < dates[j])
+    
+    // 降序输出（最新在前）
+    for(int i=0; i<kCount-1; i++)
+        for(int j=i+1; j<kCount; j++)
+            if(keys[i] < keys[j])
             {
-                string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp;
-                double tmpd=dayEndBalance[i]; dayEndBalance[i]=dayEndBalance[j]; dayEndBalance[j]=tmpd;
+                string tk=keys[i]; keys[i]=keys[j]; keys[j]=tk;
+                datetime tt=keyTimes[i]; keyTimes[i]=keyTimes[j]; keyTimes[j]=tt;
+                double td=endBals[i]; endBals[i]=endBals[j]; endBals[j]=td;
+                double tda=depAmts[i]; depAmts[i]=depAmts[j]; depAmts[j]=tda;
             }
-
-    // 限制数量
-    if(dateCount > Day_Count) dateCount = Day_Count;
-
-    for(int di=0; di<dateCount; di++)
+    
+    int limit = (maxCount > 0 && kCount > maxCount) ? maxCount : kCount;
+    
+    for(int ki=0; ki<limit; ki++)
     {
-        StatSummary s;
-        InitStat(s);
-        s.label = dates[di];
-
-        datetime dayStart = StringToTime(dates[di]);
-        datetime dayEnd   = dayStart + 86400;
-
-        // 该天的出入金
-        s.deposit = GetDepositInRange(dayStart, dayEnd);
-
-        // 该天开始余额 = 该天结束余额 - 该天盈亏 - 该天出入金
-        double dayProfit = 0;
+        StatRow s;
+        InitRow(s);
+        
+        if(mode=="day")     s.label = DayLabel(keyTimes[ki]);
+        else if(mode=="week")  s.label = WeekLabel(keyTimes[ki]);
+        else if(mode=="month") s.label = MonthLabel(keyTimes[ki]);
+        else if(mode=="quarter") s.label = QuarterLabel(keyTimes[ki]);
+        else if(mode=="year")  s.label = YearLabel(keyTimes[ki]);
+        
+        s.deposit = depAmts[ki];
+        
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
-            string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
-            if(d != dates[di]) continue;
-            AccumTrade(s, g_trades[i], 1.0);
-            dayProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
+            string k = "";
+            if(mode=="day")     k = DayKey(g_trades[i].closeTime);
+            else if(mode=="week")  k = WeekKey(g_trades[i].closeTime);
+            else if(mode=="month") k = MonthKey(g_trades[i].closeTime);
+            else if(mode=="quarter") k = QuarterKey(g_trades[i].closeTime);
+            else if(mode=="year")  k = YearKey(g_trades[i].closeTime);
+            if(k != keys[ki]) continue;
+            AccumTrade(s, g_trades[i]);
         }
-
-        // 该天开始余额（不含当天出入金，出入金不计入收益率）
-        double periodStartBal = dayEndBalance[di] - dayProfit - s.deposit;
+        
+        if(s.count == 0 && !showEmpty) continue;
+        
+        s.balance = endBals[ki];
+        double periodStartBal = endBals[ki] - s.profit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
+        FinalizeRow(s, periodStartBal);
+        
+        outArr[outCount] = s;
+        outCount++;
+    }
+}
 
-        s.balance = dayEndBalance[di];
-
-        if(s.count == 0 && !Day_ShowEmpty) continue;
-        FinalizeStat(s, periodStartBal);
-        g_dayStat[g_dayCount] = s;
-        g_dayCount++;
+void GetPeriodRange(string mode, datetime repTime, datetime &t1, datetime &t2)
+{
+    if(mode == "day")
+    {
+        t1 = repTime - repTime % 86400;
+        t2 = t1 + 86400;
+    }
+    else if(mode == "week")
+    {
+        int dow = TimeDayOfWeek(repTime);
+        if(dow == 0) dow = 7;
+        t1 = repTime - (datetime)((dow-1)*86400);
+        t1 = t1 - t1 % 86400;
+        t2 = t1 + 7*86400;
+    }
+    else if(mode == "month")
+    {
+        int y = TimeYear(repTime), m = TimeMonth(repTime);
+        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", y, m));
+        int nm = m+1, ny = y;
+        if(nm > 12) { nm=1; ny++; }
+        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", ny, nm));
+    }
+    else if(mode == "quarter")
+    {
+        int y = TimeYear(repTime), m = TimeMonth(repTime);
+        int qs = ((m-1)/3)*3+1;
+        t1 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", y, qs));
+        int qe = qs+3, qy = y;
+        if(qe > 12) { qe -= 12; qy++; }
+        t2 = StringToTime(StringFormat("%04d.%02d.01 00:00:00", qy, qe));
+    }
+    else // year
+    {
+        int y = TimeYear(repTime);
+        t1 = StringToTime(StringFormat("%04d.01.01 00:00:00", y));
+        t2 = StringToTime(StringFormat("%04d.01.01 00:00:00", y+1));
     }
 }
 
 //==========================================================================
-// 统计计算：按周统计
+// 计算分组统计（品种/Magic/备注）
 //==========================================================================
-string GetWeekLabel(datetime t)
+void CalcGroupByField(StatRow &outArr[], int &outCount, string field)
 {
-    int dow = TimeDayOfWeek(t);
+    outCount = 0;
+    ArrayResize(outArr, MAX_STATS);
+    
+    string keys[];
+    int kCount = 0;
+    ArrayResize(keys, MAX_STATS);
+    
+    double baseBalance = AccountBalance();
+    if(baseBalance <= 0) baseBalance = 1;
+    
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime == 0) continue;
+        string k = "";
+        if(field == "symbol")  k = g_trades[i].symbol;
+        else if(field == "magic")   k = IntegerToString(g_trades[i].magic);
+        else if(field == "comment") k = g_trades[i].comment;
+        
+        bool found = false;
+        for(int j=0; j<kCount; j++)
+            if(keys[j] == k) { found = true; break; }
+        if(!found && kCount < MAX_STATS)
+        {
+            keys[kCount] = k;
+            kCount++;
+        }
+    }
+    
+    for(int ki=0; ki<kCount; ki++)
+    {
+        StatRow s;
+        InitRow(s);
+        s.label = keys[ki];
+        
+        for(int i=0; i<g_tradeCount; i++)
+        {
+            if(g_trades[i].closeTime == 0) continue;
+            string k = "";
+            if(field == "symbol")  k = g_trades[i].symbol;
+            else if(field == "magic")   k = IntegerToString(g_trades[i].magic);
+            else if(field == "comment") k = g_trades[i].comment;
+            if(k != keys[ki]) continue;
+            AccumTrade(s, g_trades[i]);
+        }
+        
+        FinalizeRow(s, baseBalance);
+        outArr[outCount] = s;
+        outCount++;
+    }
+}
+
+//==========================================================================
+// 计算持仓汇总
+//==========================================================================
+void CalcHoldingStats()
+{
+    InitRow(g_holdingSum); g_holdingSum.label = "持仓";
+    InitRow(g_buySum);     g_buySum.label = "多单Buy";
+    InitRow(g_sellSum);    g_sellSum.label = "空单Sell";
+    
+    for(int i=0; i<g_tradeCount; i++)
+    {
+        if(g_trades[i].closeTime != 0) continue;
+        AccumTrade(g_holdingSum, g_trades[i]);
+        if(g_trades[i].type == OP_BUY)
+            AccumTrade(g_buySum, g_trades[i]);
+        else
+            AccumTrade(g_sellSum, g_trades[i]);
+    }
+    g_holdingSum.balance = AccountBalance();
+    FinalizeRow(g_holdingSum, AccountBalance());
+    FinalizeRow(g_buySum, AccountBalance());
+    FinalizeRow(g_sellSum, AccountBalance());
+}
+
+//==========================================================================
+// 计算综合汇总（本周/月/季/年）
+//==========================================================================
+void CalcSummaryStats()
+{
+    datetime now = TimeCurrent();
+    
+    // 本周开始
+    int dow = TimeDayOfWeek(now);
     if(dow == 0) dow = 7;
-    datetime monday = t - (datetime)((dow-1)*86400);
-    monday = monday - monday % 86400;
-    datetime sunday = monday + (datetime)(6*86400);
-    return TimeToStr(monday, TIME_DATE) + " ~ " + TimeToStr(sunday, TIME_DATE);
-}
-
-datetime GetWeekStart(datetime t)
-{
-    int dow = TimeDayOfWeek(t);
-    if(dow == 0) dow = 7;
-    datetime monday = t - (datetime)((dow-1)*86400);
-    return monday - monday % 86400;
-}
-
-void CalcWeekStats()
-{
-    g_weekCount = 0;
-    ArrayResize(g_weekStat, MAX_STATS);
-
-    datetime weekStarts[];
-    int wCount = 0;
-    ArrayResize(weekStarts, MAX_STATS);
-
+    datetime weekStart = now - (datetime)((dow-1)*86400);
+    weekStart = weekStart - weekStart % 86400;
+    
+    // 本月开始
+    datetime monthStart = StringToTime(StringFormat("%04d.%02d.01 00:00:00", TimeYear(now), TimeMonth(now)));
+    
+    // 本季开始
+    int qs = ((TimeMonth(now)-1)/3)*3+1;
+    datetime quarterStart = StringToTime(StringFormat("%04d.%02d.01 00:00:00", TimeYear(now), qs));
+    
+    // 本年开始
+    datetime yearStart = StringToTime(StringFormat("%04d.01.01 00:00:00", TimeYear(now)));
+    
+    InitRow(g_weekSum);    g_weekSum.label    = "本周盈亏";
+    InitRow(g_monthSum);   g_monthSum.label   = "本月盈亏";
+    InitRow(g_quarterSum); g_quarterSum.label = "本季盈亏";
+    InitRow(g_yearSum);    g_yearSum.label    = "本年盈亏";
+    InitRow(g_totalSum);   g_totalSum.label   = "账户持仓汇总，Magic=";
+    
+    double bal = AccountBalance();
+    
     for(int i=0; i<g_tradeCount; i++)
     {
         if(g_trades[i].closeTime == 0) continue;
-        datetime ws = GetWeekStart(g_trades[i].closeTime);
-        bool found = false;
-        for(int j=0; j<wCount; j++)
-            if(weekStarts[j] == ws) { found = true; break; }
-        if(!found && wCount < MAX_STATS)
-        {
-            weekStarts[wCount] = ws;
-            wCount++;
-        }
+        datetime ct = g_trades[i].closeTime;
+        if(ct >= weekStart)    AccumTrade(g_weekSum, g_trades[i]);
+        if(ct >= monthStart)   AccumTrade(g_monthSum, g_trades[i]);
+        if(ct >= quarterStart) AccumTrade(g_quarterSum, g_trades[i]);
+        if(ct >= yearStart)    AccumTrade(g_yearSum, g_trades[i]);
+        AccumTrade(g_totalSum, g_trades[i]);
     }
-
-    // 升序排序用于计算运行余额
-    for(int i=0; i<wCount-1; i++)
-        for(int j=i+1; j<wCount; j++)
-            if(weekStarts[i] > weekStarts[j]) { datetime tmp=weekStarts[i]; weekStarts[i]=weekStarts[j]; weekStarts[j]=tmp; }
-
-    // 计算初始余额
-    double totalClosedPnL = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-    }
-    double totalDeposits = 0;
-    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
-    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
-    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = 1;
-
-    // 按升序计算每周结束余额（包含出入金）
-    double wkEndBal[];
-    ArrayResize(wkEndBal, wCount);
-    double runBal = startBalance;
-    for(int wi=0; wi<wCount; wi++)
-    {
-        datetime wkEnd = weekStarts[wi] + 7*86400;
-        runBal += GetDepositInRange(weekStarts[wi], wkEnd);
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetWeekStart(g_trades[i].closeTime) != weekStarts[wi]) continue;
-            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-        wkEndBal[wi] = runBal;
-    }
-
-    // 降序排序
-    for(int i=0; i<wCount-1; i++)
-        for(int j=i+1; j<wCount; j++)
-            if(weekStarts[i] < weekStarts[j])
-            {
-                datetime tmp=weekStarts[i]; weekStarts[i]=weekStarts[j]; weekStarts[j]=tmp;
-                double tmpd=wkEndBal[i]; wkEndBal[i]=wkEndBal[j]; wkEndBal[j]=tmpd;
-            }
-
-    if(wCount > Week_Count) wCount = Week_Count;
-
-    for(int wi=0; wi<wCount; wi++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = GetWeekLabel(weekStarts[wi]);
-
-        datetime wkEnd = weekStarts[wi] + 7*86400;
-        s.deposit = GetDepositInRange(weekStarts[wi], wkEnd);
-
-        double wkProfit = 0;
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetWeekStart(g_trades[i].closeTime) != weekStarts[wi]) continue;
-            AccumTrade(s, g_trades[i], 1.0);
-            wkProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-
-        double periodStartBal = wkEndBal[wi] - wkProfit - s.deposit;
-        if(periodStartBal <= 0) periodStartBal = 1;
-        s.balance = wkEndBal[wi];
-
-        if(s.count == 0 && !Week_ShowEmpty) continue;
-        FinalizeStat(s, periodStartBal);
-        g_weekStat[g_weekCount] = s;
-        g_weekCount++;
-    }
+    
+    // 出入金
+    g_weekSum.deposit    = GetDepositInRange(weekStart, now+86400);
+    g_monthSum.deposit   = GetDepositInRange(monthStart, now+86400);
+    g_quarterSum.deposit = GetDepositInRange(quarterStart, now+86400);
+    g_yearSum.deposit    = GetDepositInRange(yearStart, now+86400);
+    
+    FinalizeRow(g_weekSum,    bal);
+    FinalizeRow(g_monthSum,   bal);
+    FinalizeRow(g_quarterSum, bal);
+    FinalizeRow(g_yearSum,    bal);
+    FinalizeRow(g_totalSum,   bal);
 }
 
 //==========================================================================
-// 统计计算：按月统计
+// 刷新所有数据
 //==========================================================================
-string GetMonthLabel(datetime t)
+void RefreshAll()
 {
-    return StringFormat("%04d.%02d", TimeYear(t), TimeMonth(t));
+    g_tradeCount   = 0;
+    g_depositCount = 0;
+    ArrayResize(g_trades,   MAX_TRADES);
+    ArrayResize(g_deposits, MAX_DEPOSITS);
+    
+    // 1. 先从CSV加载历史数据
+    LoadFromCSV();
+    
+    // 2. 再从MT4加载（去重）
+    LoadFromMT4();
+    
+    // 3. 按时间排序
+    SortTradesByCloseTime();
+    
+    // 4. 计算各维度统计
+    CalcGroupStats(g_dayStat,     g_dayCount,     Day_Count,     Day_ShowEmpty,     "day");
+    CalcGroupStats(g_weekStat,    g_weekCount,    Week_Count,    Week_ShowEmpty,    "week");
+    CalcGroupStats(g_monthStat,   g_monthCount,   Month_Count,   Month_ShowEmpty,   "month");
+    CalcGroupStats(g_quarterStat, g_quarterCount, Quarter_Count, Quarter_ShowEmpty, "quarter");
+    CalcGroupStats(g_yearStat,    g_yearCount,    Year_Count,    Year_ShowEmpty,    "year");
+    
+    CalcGroupByField(g_symbolStat,  g_symbolCount,  "symbol");
+    CalcGroupByField(g_magicStat,   g_magicCount,   "magic");
+    CalcGroupByField(g_commentStat, g_commentCount, "comment");
+    
+    CalcHoldingStats();
+    CalcSummaryStats();
+    
+    // 5. 构建曲线数据（月度余额）
+    BuildCurveData();
+    
+    // 6. 自动保存CSV
+    datetime now = TimeCurrent();
+    if(CSV_AutoSave && now - g_lastSave >= 300) // 每5分钟
+    {
+        SaveToCSV();
+        g_lastSave = now;
+    }
+    
+    g_lastRefresh = now;
 }
 
-datetime GetMonthStart(datetime t)
+//==========================================================================
+// 构建收益曲线数据（使用月度余额）
+//==========================================================================
+void BuildCurveData()
 {
-    // 计算当月第一天
-    int y = TimeYear(t);
-    int m = TimeMonth(t);
-    // 从1970年计算到当月第一天的秒数
-    // 简化：当前时间减去当月已过天数
-    int d = TimeDay(t); // 1-based
-    return t - (datetime)((d-1)*86400) - (t - (datetime)((d-1)*86400)) % 86400;
+    // 使用月统计的余额数据（已按降序排列，需要反转为升序）
+    g_curveCount = g_monthCount;
+    if(g_curveCount > MAX_STATS) g_curveCount = MAX_STATS;
+    ArrayResize(g_curveVals,   g_curveCount);
+    ArrayResize(g_curveLabels, g_curveCount);
+    
+    // monthStat是降序，需要反转
+    for(int i=0; i<g_curveCount; i++)
+    {
+        int idx = g_curveCount - 1 - i;
+        g_curveVals[i]   = g_monthStat[idx].balance;
+        g_curveLabels[i] = g_monthStat[idx].label;
+    }
 }
 
-void CalcMonthStats()
+//==========================================================================
+// UI对象辅助函数
+//==========================================================================
+void DelObj(string name)
 {
-    g_monthCount = 0;
-    ArrayResize(g_monthStat, MAX_STATS);
-
-    datetime monthStarts[];
-    int mCount = 0;
-    ArrayResize(monthStarts, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        datetime ms = GetMonthStart(g_trades[i].closeTime);
-        bool found = false;
-        for(int j=0; j<mCount; j++)
-            if(monthStarts[j] == ms) { found = true; break; }
-        if(!found && mCount < MAX_STATS)
-        {
-            monthStarts[mCount] = ms;
-            mCount++;
-        }
-    }
-
-    // 升序排序用于计算运行余额
-    for(int i=0; i<mCount-1; i++)
-        for(int j=i+1; j<mCount; j++)
-            if(monthStarts[i] > monthStarts[j]) { datetime tmp=monthStarts[i]; monthStarts[i]=monthStarts[j]; monthStarts[j]=tmp; }
-
-    double totalClosedPnL = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-    }
-    double totalDeposits = 0;
-    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
-    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
-    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = 1;
-
-    double moEndBal[];
-    ArrayResize(moEndBal, mCount);
-    double runBal = startBalance;
-    for(int mi=0; mi<mCount; mi++)
-    {
-        // 当月出入金
-        int nextMon = TimeMonth(monthStarts[mi]) + 1;
-        int nextYear = TimeYear(monthStarts[mi]);
-        if(nextMon > 12) { nextMon = 1; nextYear++; }
-        datetime moEnd = StringToTime(StringFormat("%04d.%02d.01", nextYear, nextMon));
-        runBal += GetDepositInRange(monthStarts[mi], moEnd);
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetMonthStart(g_trades[i].closeTime) != monthStarts[mi]) continue;
-            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-        moEndBal[mi] = runBal;
-    }
-
-    // 降序排序
-    for(int i=0; i<mCount-1; i++)
-        for(int j=i+1; j<mCount; j++)
-            if(monthStarts[i] < monthStarts[j])
-            {
-                datetime tmp=monthStarts[i]; monthStarts[i]=monthStarts[j]; monthStarts[j]=tmp;
-                double tmpd=moEndBal[i]; moEndBal[i]=moEndBal[j]; moEndBal[j]=tmpd;
-            }
-
-    if(mCount > Month_Count) mCount = Month_Count;
-
-    for(int mi=0; mi<mCount; mi++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = GetMonthLabel(monthStarts[mi]);
-
-        int nextMon = TimeMonth(monthStarts[mi]) + 1;
-        int nextYear = TimeYear(monthStarts[mi]);
-        if(nextMon > 12) { nextMon = 1; nextYear++; }
-        datetime moEnd = StringToTime(StringFormat("%04d.%02d.01", nextYear, nextMon));
-        s.deposit = GetDepositInRange(monthStarts[mi], moEnd);
-
-        double moProfit = 0;
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetMonthStart(g_trades[i].closeTime) != monthStarts[mi]) continue;
-            AccumTrade(s, g_trades[i], 1.0);
-            moProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-
-        double periodStartBal = moEndBal[mi] - moProfit - s.deposit;
-        if(periodStartBal <= 0) periodStartBal = 1;
-        s.balance = moEndBal[mi];
-
-        if(s.count == 0 && !Month_ShowEmpty) continue;
-        FinalizeStat(s, periodStartBal);
-        g_monthStat[g_monthCount] = s;
-        g_monthCount++;
-    }
+    if(ObjectFind(0, name) >= 0) ObjectDelete(0, name);
 }
 
-//==========================================================================
-// 统计计算：按季度统计
-//==========================================================================
-string GetQuarterLabel(datetime t)
+void MakeRect(string name, int x, int y, int w, int h, color clr, int border=0)
 {
-    int y = TimeYear(t);
-    int m = TimeMonth(t);
-    int q = (m - 1) / 3 + 1;
-    int qStartMon = (q-1)*3 + 1;
-    int qEndMon   = q*3;
-    return StringFormat("%04d.%02d ~ %04d.%02d", y, qStartMon, y, qEndMon);
+    if(ObjectFind(0, name) < 0)
+        ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
+    ObjectSetInteger(0, name, OBJPROP_YSIZE, h);
+    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, clr);
+    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, border);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, name, OBJPROP_BACK, false);
+    ObjectSetInteger(0, name, OBJPROP_ZORDER, 0);
 }
 
-// 返回季度标识符，用于分组比较
-string GetQuarterKey(datetime t)
+void MakeLabel(string name, int x, int y, string text, color clr, int fs=0, string fn="")
 {
-    int y = TimeYear(t);
-    int m = TimeMonth(t);
-    int q = (m - 1) / 3 + 1;
-    return StringFormat("%04d_Q%d", y, q);
+    if(fs == 0) fs = FontSize;
+    if(fn == "") fn = FontName;
+    if(ObjectFind(0, name) < 0)
+        ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetString(0,  name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fs);
+    ObjectSetString(0,  name, OBJPROP_FONT, fn);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+    ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+    ObjectSetInteger(0, name, OBJPROP_BACK, false);
+    ObjectSetInteger(0, name, OBJPROP_ZORDER, 10);
 }
 
-datetime GetQuarterStart(datetime t)
+void UpdateLabel(string name, string text, color clr)
 {
-    int y = TimeYear(t);
-    int m = TimeMonth(t);
-    int qStartMon = ((m - 1) / 3) * 3 + 1;
-    // 当月第一天
-    datetime monthStart = GetMonthStart(t);
-    // 往回调整到季度第一个月的第一天
-    int monthDiff = m - qStartMon;
-    if(monthDiff == 0) return monthStart;
-    // 逐月往前调整
-    datetime result = monthStart;
-    for(int i=0; i<monthDiff; i++)
+    if(ObjectFind(0, name) >= 0)
     {
-        // 往前调一天到上个月
-        result = result - (datetime)(86400);
-        result = GetMonthStart(result);
-    }
-    return result;
-}
-
-void CalcQuarterStats()
-{
-    g_quarterCount = 0;
-    ArrayResize(g_quarterStat, MAX_STATS);
-
-    string qKeys[];
-    datetime qRepTime[];
-    int qCount = 0;
-    ArrayResize(qKeys, MAX_STATS);
-    ArrayResize(qRepTime, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        string qk = GetQuarterKey(g_trades[i].closeTime);
-        bool found = false;
-        for(int j=0; j<qCount; j++)
-            if(qKeys[j] == qk) { found = true; break; }
-        if(!found && qCount < MAX_STATS)
-        {
-            qKeys[qCount] = qk;
-            qRepTime[qCount] = g_trades[i].closeTime;
-            qCount++;
-        }
-    }
-
-    // 升序排序用于计算运行余额
-    for(int i=0; i<qCount-1; i++)
-        for(int j=i+1; j<qCount; j++)
-            if(qKeys[i] > qKeys[j])
-            {
-                string tmpk = qKeys[i]; qKeys[i] = qKeys[j]; qKeys[j] = tmpk;
-                datetime tmpt = qRepTime[i]; qRepTime[i] = qRepTime[j]; qRepTime[j] = tmpt;
-            }
-
-    double totalClosedPnL = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-    }
-    double totalDeposits = 0;
-    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
-    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
-    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = 1;
-
-    double qEndBal[];
-    ArrayResize(qEndBal, qCount);
-    double runBal = startBalance;
-    for(int qi=0; qi<qCount; qi++)
-    {
-        // 当季度的出入金
-        datetime qStart = GetQuarterStart(qRepTime[qi]);
-        int qMon = TimeMonth(qRepTime[qi]);
-        int qEndMon = ((qMon-1)/3)*3 + 4;
-        int qEndYear = TimeYear(qRepTime[qi]);
-        if(qEndMon > 12) { qEndMon -= 12; qEndYear++; }
-        datetime qEnd = StringToTime(StringFormat("%04d.%02d.01", qEndYear, qEndMon));
-        runBal += GetDepositInRange(qStart, qEnd);
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetQuarterKey(g_trades[i].closeTime) != qKeys[qi]) continue;
-            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-        qEndBal[qi] = runBal;
-    }
-
-    // 降序排序
-    for(int i=0; i<qCount-1; i++)
-        for(int j=i+1; j<qCount; j++)
-            if(qKeys[i] < qKeys[j])
-            {
-                string tmpk = qKeys[i]; qKeys[i] = qKeys[j]; qKeys[j] = tmpk;
-                datetime tmpt = qRepTime[i]; qRepTime[i] = qRepTime[j]; qRepTime[j] = tmpt;
-                double tmpd = qEndBal[i]; qEndBal[i] = qEndBal[j]; qEndBal[j] = tmpd;
-            }
-
-    if(qCount > Quarter_Count) qCount = Quarter_Count;
-
-    for(int qi=0; qi<qCount; qi++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = GetQuarterLabel(qRepTime[qi]);
-
-        datetime qStart = GetQuarterStart(qRepTime[qi]);
-        int qMon = TimeMonth(qRepTime[qi]);
-        int qEndMon = ((qMon-1)/3)*3 + 4;
-        int qEndYear = TimeYear(qRepTime[qi]);
-        if(qEndMon > 12) { qEndMon -= 12; qEndYear++; }
-        datetime qEnd = StringToTime(StringFormat("%04d.%02d.01", qEndYear, qEndMon));
-        s.deposit = GetDepositInRange(qStart, qEnd);
-
-        double qProfit = 0;
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetQuarterKey(g_trades[i].closeTime) != qKeys[qi]) continue;
-            AccumTrade(s, g_trades[i], 1.0);
-            qProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-
-        double periodStartBal = qEndBal[qi] - qProfit - s.deposit;
-        if(periodStartBal <= 0) periodStartBal = 1;
-        s.balance = qEndBal[qi];
-
-        if(s.count == 0 && !Quarter_ShowEmpty) continue;
-        FinalizeStat(s, periodStartBal);
-        g_quarterStat[g_quarterCount] = s;
-        g_quarterCount++;
+        ObjectSetString(0, name, OBJPROP_TEXT, text);
+        ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
     }
 }
 
-//==========================================================================
-// 统计计算：按年统计
-//==========================================================================
-string GetYearLabel(datetime t)
-{
-    return StringFormat("%04d", TimeYear(t));
-}
-
-datetime GetYearStart(datetime t)
-{
-    // 先得到当月第一天，再往前逐月调整到当1月
-    int m = TimeMonth(t);
-    datetime result = GetMonthStart(t);
-    // 往前调整 m-1 个月
-    for(int i=1; i<m; i++)
-    {
-        result = result - (datetime)(86400);
-        result = GetMonthStart(result);
-    }
-    return result;
-}
-
-void CalcYearStats()
-{
-    g_yearCount = 0;
-    ArrayResize(g_yearStat, MAX_STATS);
-
-    datetime yStarts[];
-    int yCount = 0;
-    ArrayResize(yStarts, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        datetime ys = GetYearStart(g_trades[i].closeTime);
-        bool found = false;
-        for(int j=0; j<yCount; j++)
-            if(yStarts[j] == ys) { found = true; break; }
-        if(!found && yCount < MAX_STATS)
-        {
-            yStarts[yCount] = ys;
-            yCount++;
-        }
-    }
-
-    // 升序排序用于计算运行余额
-    for(int i=0; i<yCount-1; i++)
-        for(int j=i+1; j<yCount; j++)
-            if(yStarts[i] > yStarts[j]) { datetime tmp=yStarts[i]; yStarts[i]=yStarts[j]; yStarts[j]=tmp; }
-
-    double totalClosedPnL = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-    }
-    double totalDeposits = 0;
-    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
-    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
-    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = 1;
-
-    double yEndBal[];
-    ArrayResize(yEndBal, yCount);
-    double runBal = startBalance;
-    for(int yi=0; yi<yCount; yi++)
-    {
-        // 当年出入金
-        int yr = TimeYear(yStarts[yi]);
-        datetime yEnd = StringToTime(StringFormat("%04d.01.01", yr+1));
-        runBal += GetDepositInRange(yStarts[yi], yEnd);
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetYearStart(g_trades[i].closeTime) != yStarts[yi]) continue;
-            runBal += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-        yEndBal[yi] = runBal;
-    }
-
-    // 降序排序
-    for(int i=0; i<yCount-1; i++)
-        for(int j=i+1; j<yCount; j++)
-            if(yStarts[i] < yStarts[j])
-            {
-                datetime tmp=yStarts[i]; yStarts[i]=yStarts[j]; yStarts[j]=tmp;
-                double tmpd=yEndBal[i]; yEndBal[i]=yEndBal[j]; yEndBal[j]=tmpd;
-            }
-
-    if(yCount > Year_Count) yCount = Year_Count;
-
-    for(int yi=0; yi<yCount; yi++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = GetYearLabel(yStarts[yi]);
-
-        int yr = TimeYear(yStarts[yi]);
-        datetime yEnd = StringToTime(StringFormat("%04d.01.01", yr+1));
-        s.deposit = GetDepositInRange(yStarts[yi], yEnd);
-
-        double yProfit = 0;
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].closeTime == 0) continue;
-            if(GetYearStart(g_trades[i].closeTime) != yStarts[yi]) continue;
-            AccumTrade(s, g_trades[i], 1.0);
-            yProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-        }
-
-        double periodStartBal = yEndBal[yi] - yProfit - s.deposit;
-        if(periodStartBal <= 0) periodStartBal = 1;
-        s.balance = yEndBal[yi];
-
-        if(s.count == 0 && !Year_ShowEmpty) continue;
-        FinalizeStat(s, periodStartBal);
-        g_yearStat[g_yearCount] = s;
-        g_yearCount++;
-    }
-}
-
-//==========================================================================
-// 统计计算：按品种统计
-//==========================================================================
-void CalcSymbolStats()
-{
-    g_symbolCount = 0;
-    ArrayResize(g_symbolStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
-    string symbols[];
-    int sCount = 0;
-    ArrayResize(symbols, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        bool found = false;
-        for(int j=0; j<sCount; j++)
-            if(symbols[j] == g_trades[i].symbol) { found = true; break; }
-        if(!found && sCount < MAX_STATS)
-        {
-            symbols[sCount] = g_trades[i].symbol;
-            sCount++;
-        }
-    }
-
-    for(int si=0; si<sCount; si++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = symbols[si];
-
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].symbol != symbols[si]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
-        }
-
-        FinalizeStat(s, baseBalance);
-        g_symbolStat[g_symbolCount] = s;
-        g_symbolCount++;
-    }
-}
-
-//==========================================================================
-// 统计计算：按Magic统计
-//==========================================================================
-void CalcMagicStats()
-{
-    g_magicCount = 0;
-    ArrayResize(g_magicStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
-    int magics[];
-    int mCount = 0;
-    ArrayResize(magics, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        bool found = false;
-        for(int j=0; j<mCount; j++)
-            if(magics[j] == g_trades[i].magic) { found = true; break; }
-        if(!found && mCount < MAX_STATS)
-        {
-            magics[mCount] = g_trades[i].magic;
-            mCount++;
-        }
-    }
-
-    for(int mi=0; mi<mCount; mi++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = IntegerToString(magics[mi]);
-
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            if(g_trades[i].magic != magics[mi]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
-        }
-
-        FinalizeStat(s, baseBalance);
-        g_magicStat[g_magicCount] = s;
-        g_magicCount++;
-    }
-}
-
-//==========================================================================
-// 统计计算：按备注统计
-//==========================================================================
-void CalcCommentStats()
-{
-    g_commentCount = 0;
-    ArrayResize(g_commentStat, MAX_STATS);
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
-    string comments[];
-    int cCount = 0;
-    ArrayResize(comments, MAX_STATS);
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        // 取备注前20字符作为分组键
-        string c = StringSubstr(g_trades[i].comment, 0, 20);
-        if(StringLen(c) == 0) c = "(无备注)";
-        bool found = false;
-        for(int j=0; j<cCount; j++)
-            if(comments[j] == c) { found = true; break; }
-        if(!found && cCount < MAX_STATS)
-        {
-            comments[cCount] = c;
-            cCount++;
-        }
-    }
-
-    for(int ci=0; ci<cCount; ci++)
-    {
-        StatSummary s;
-        InitStat(s);
-        s.label = comments[ci];
-
-        for(int i=0; i<g_tradeCount; i++)
-        {
-            string c = StringSubstr(g_trades[i].comment, 0, 20);
-            if(StringLen(c) == 0) c = "(无备注)";
-            if(c != comments[ci]) continue;
-            AccumTrade(s, g_trades[i], baseBalance);
-        }
-
-        FinalizeStat(s, baseBalance);
-        g_commentStat[g_commentCount] = s;
-        g_commentCount++;
-    }
-}
-
-//==========================================================================
-// 计算净值曲线
-//==========================================================================
-void CalcEquityCurve()
-{
-    g_equityCount = 0;
-    ArrayResize(g_equityCurve, MAX_TRADES + 10);
-    ArrayResize(g_equityTime, MAX_TRADES + 10);
-
-    // 按平仓时间排序交易（简单插入排序）
-    int idx[];
-    ArrayResize(idx, g_tradeCount);
-    for(int i=0; i<g_tradeCount; i++) idx[i] = i;
-    for(int i=0; i<g_tradeCount-1; i++)
-        for(int j=i+1; j<g_tradeCount; j++)
-        {
-            datetime ti = (g_trades[idx[i]].closeTime > 0) ? g_trades[idx[i]].closeTime : g_trades[idx[i]].openTime;
-            datetime tj = (g_trades[idx[j]].closeTime > 0) ? g_trades[idx[j]].closeTime : g_trades[idx[j]].openTime;
-            if(ti > tj) { int tmp=idx[i]; idx[i]=idx[j]; idx[j]=tmp; }
-        }
-
-    // 获取初始余额（从账户历史中找最早的入金记录，简化为当前余额减去所有盈亏）
-    double totalProfit = 0;
-    for(int i=0; i<g_tradeCount; i++)
-        totalProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
-
-    double startBalance = AccountBalance() - totalProfit;
-    if(startBalance <= 0) startBalance = AccountBalance();
-
-    double runningBalance = startBalance;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        int ti = idx[i];
-        if(g_trades[ti].closeTime == 0) continue; // 跳过持仓
-        runningBalance += g_trades[ti].profit + g_trades[ti].commission + g_trades[ti].swap;
-        g_equityCurve[g_equityCount] = runningBalance;
-        g_equityTime[g_equityCount]  = g_trades[ti].closeTime;
-        g_equityCount++;
-    }
-}
-
-//==========================================================================
-// 执行所有统计计算
-//==========================================================================
-void CalcAllStats()
-{
-    CalcDayStats();
-    CalcWeekStats();
-    CalcMonthStats();
-    CalcQuarterStats();
-    CalcYearStats();
-    CalcSymbolStats();
-    CalcMagicStats();
-    CalcCommentStats();
-    CalcEquityCurve();
-}
-
-
-//==========================================================================
-// UI 绘制辅助函数
-//==========================================================================
-
-// 删除所有指标对象
+// 删除所有本指标对象
 void DeleteAllObjects()
 {
-    int total = ObjectsTotal();
-    for(int i=total-1; i>=0; i--)
+    for(int i=ObjectsTotal(0)-1; i>=0; i--)
     {
-        string name = ObjectName(i);
-        if(StringFind(name, PREFIX) == 0)
-            ObjectDelete(name);
+        string name = ObjectName(0, i);
+        if(StringFind(name, g_prefix) == 0)
+            ObjectDelete(0, name);
     }
 }
 
-// 创建矩形背景
-void CreateRect(string name, int x, int y, int w, int h, color clr, int border=0, color borderClr=clrNONE)
-{
-    string n = PREFIX + name;
-    if(ObjectFind(n) < 0)
-        ObjectCreate(0, n, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
-    ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
-    ObjectSetInteger(0, n, OBJPROP_BGCOLOR, clr);
-    ObjectSetInteger(0, n, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-    ObjectSetInteger(0, n, OBJPROP_COLOR, (borderClr != clrNONE) ? borderClr : clr);
-    ObjectSetInteger(0, n, OBJPROP_WIDTH, border);
-    ObjectSetInteger(0, n, OBJPROP_BACK, false);
-    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, n, OBJPROP_SELECTED, false);
-    ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-}
-
-// 创建文本标签
-void CreateLabel(string name, int x, int y, string text, color clr, int fontSize=0, string anchor="left")
-{
-    string n = PREFIX + name;
-    if(ObjectFind(n) < 0)
-        ObjectCreate(0, n, OBJ_LABEL, 0, 0, 0);
-    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-    ObjectSetString(0, n, OBJPROP_TEXT, text);
-    ObjectSetInteger(0, n, OBJPROP_COLOR, clr);
-    ObjectSetInteger(0, n, OBJPROP_FONTSIZE, (fontSize > 0) ? fontSize : FontSize);
-    ObjectSetString(0, n, OBJPROP_FONT, "Arial");
-    ObjectSetInteger(0, n, OBJPROP_BACK, false);
-    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    if(anchor == "right")
-        ObjectSetInteger(0, n, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-    else
-        ObjectSetInteger(0, n, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-}
-
-// 创建可点击按钮
-void CreateButton(string name, int x, int y, int w, int h, string text, color bgClr, color textClr, int fontSize=0)
-{
-    string n = PREFIX + name;
-    if(ObjectFind(n) < 0)
-        ObjectCreate(0, n, OBJ_BUTTON, 0, 0, 0);
-    ObjectSetInteger(0, n, OBJPROP_XDISTANCE, x);
-    ObjectSetInteger(0, n, OBJPROP_YDISTANCE, y);
-    ObjectSetInteger(0, n, OBJPROP_XSIZE, w);
-    ObjectSetInteger(0, n, OBJPROP_YSIZE, h);
-    ObjectSetString(0, n, OBJPROP_TEXT, text);
-    ObjectSetInteger(0, n, OBJPROP_BGCOLOR, bgClr);
-    ObjectSetInteger(0, n, OBJPROP_COLOR, textClr);
-    ObjectSetInteger(0, n, OBJPROP_FONTSIZE, (fontSize > 0) ? fontSize : FontSize);
-    ObjectSetString(0, n, OBJPROP_FONT, "Arial");
-    ObjectSetInteger(0, n, OBJPROP_BACK, false);
-    ObjectSetInteger(0, n, OBJPROP_SELECTABLE, false);
-    ObjectSetInteger(0, n, OBJPROP_HIDDEN, true);
-    ObjectSetInteger(0, n, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-    ObjectSetInteger(0, n, OBJPROP_STATE, false);
-}
-
 //==========================================================================
-// 计算面板宽度（根据显示列）
+// 列宽初始化
 //==========================================================================
-// 列宽定义
-int ColW_Label    = 120;
-int ColW_Lots     = 60;
-int ColW_MaxLots  = 70;
-int ColW_Count    = 45;
-int ColW_Profit   = 75;
-int ColW_ProfitPct= 65;
-int ColW_Comm     = 65;
-int ColW_Swap     = 65;
-int ColW_Deposit  = 80;
-int ColW_Balance  = 80;
-int ColW_MaxDD    = 75;
-int ColW_MaxDDPct = 75;
-int ColW_MaxFloat = 75;
-int ColW_MaxFloatPct = 75;
-int ColW_HoldTime = 150;
-int ColW_WinRate  = 65;
-int ColW_PF       = 55;
-
-int GetTotalPanelWidth()
+void InitColWidths()
 {
-    int w = ColW_Label;
-    if(Show_Lots)        w += ColW_Lots;
-    if(Show_MaxLots)     w += ColW_MaxLots;
-    if(Show_Count)       w += ColW_Count;
-    if(Show_Profit)      w += ColW_Profit;
-    if(Show_ProfitPct)   w += ColW_ProfitPct;
-    if(Show_Commission)  w += ColW_Comm;
-    if(Show_Swap)        w += ColW_Swap;
-    if(Show_Deposit)     w += ColW_Deposit;
-    if(Show_Balance)     w += ColW_Balance;
-    if(Show_MaxDD)       w += ColW_MaxDD;
-    if(Show_MaxDDPct)    w += ColW_MaxDDPct;
-    if(Show_MaxFloat)    w += ColW_MaxFloat;
-    if(Show_MaxFloatPct) w += ColW_MaxFloatPct;
-    if(Show_HoldTime)    w += ColW_HoldTime;
-    if(Show_WinRate)     w += ColW_WinRate;
-    if(Show_ProfitFactor)w += ColW_PF;
-    return w + 10;
+    // 列：日期/标签, 总手数, 最小大手数, 次数, 盈亏金额, 百分比%, 手续费, 库存费, 出入金, 余额, 最大浮亏, 最大浮亏比例, 最大浮盈金额, 最大浮盈比例, 最小平均最大持仓时间, 胜率, 盈亏比
+    int w[COL_WIDTHS_COUNT];
+    w[0]  = 100; // 日期
+    w[1]  = 55;  // 总手数
+    w[2]  = 80;  // 最小|大手数
+    w[3]  = 40;  // 次数
+    w[4]  = 75;  // 盈亏金额
+    w[5]  = 65;  // 百分比%
+    w[6]  = 60;  // 手续费
+    w[7]  = 55;  // 库存费
+    w[8]  = 65;  // 出入金
+    w[9]  = 75;  // 余额
+    w[10] = 65;  // 最大浮亏
+    w[11] = 75;  // 最大浮亏比例
+    w[12] = 75;  // 最大浮盈金额
+    w[13] = 75;  // 最大浮盈比例
+    w[14] = 200; // 最小平均最大持仓时间
+    w[15] = 55;  // 胜率
+    w[16] = 45;  // 盈亏比
+    w[17] = 0;   // 备用
+    for(int i=0; i<COL_WIDTHS_COUNT; i++) g_colW[i] = w[i];
 }
 
 //==========================================================================
 // 绘制表头
 //==========================================================================
-void DrawTableHeader(int x, int y, int panelW, string labelTitle)
+void DrawHeader(int x, int y, string labelCol)
 {
-    int cx = x + 2;
-    CreateRect("hdr_bg", x, y, panelW, HEADER_H, ColorHeader);
-
-    CreateLabel("hdr_label", cx, y+2, labelTitle, ColorGray);
-    cx += ColW_Label;
-
-    if(Show_Lots)        { CreateLabel("hdr_lots",    cx, y+2, "总手数",    ColorGray); cx += ColW_Lots; }
-    if(Show_MaxLots)     { CreateLabel("hdr_maxlots", cx, y+2, "最小大手数", ColorGray); cx += ColW_MaxLots; }
-    if(Show_Count)       { CreateLabel("hdr_count",   cx, y+2, "次数",      ColorGray); cx += ColW_Count; }
-    if(Show_Profit)      { CreateLabel("hdr_profit",  cx, y+2, "盈亏金额",  ColorGray); cx += ColW_Profit; }
-    if(Show_ProfitPct)   { CreateLabel("hdr_pct",     cx, y+2, "百分比%",   ColorGray); cx += ColW_ProfitPct; }
-    if(Show_Commission)  { CreateLabel("hdr_comm",    cx, y+2, "手续费",    ColorGray); cx += ColW_Comm; }
-    if(Show_Swap)        { CreateLabel("hdr_swap",    cx, y+2, "库存费",    ColorGray); cx += ColW_Swap; }
-    if(Show_Deposit)     { CreateLabel("hdr_dep",     cx, y+2, "出入金",    ColorGray); cx += ColW_Deposit; }
-    if(Show_Balance)     { CreateLabel("hdr_bal",     cx, y+2, "余额",      ColorGray); cx += ColW_Balance; }
-    if(Show_MaxDD)       { CreateLabel("hdr_maxdd",   cx, y+2, "最大浮亏",  ColorGray); cx += ColW_MaxDD; }
-    if(Show_MaxDDPct)    { CreateLabel("hdr_maxddpct",cx, y+2, "最大浮亏比例", ColorGray); cx += ColW_MaxDDPct; }
-    if(Show_MaxFloat)    { CreateLabel("hdr_maxfl",   cx, y+2, "最大浮盈金额", ColorGray); cx += ColW_MaxFloat; }
-    if(Show_MaxFloatPct) { CreateLabel("hdr_maxflpct",cx, y+2, "最大浮盈比例", ColorGray); cx += ColW_MaxFloatPct; }
-    if(Show_HoldTime)    { CreateLabel("hdr_hold",    cx, y+2, "最小平均最大持仓时间", ColorGray); cx += ColW_HoldTime; }
-    if(Show_WinRate)     { CreateLabel("hdr_win",     cx, y+2, "胜率",      ColorGray); cx += ColW_WinRate; }
-    if(Show_ProfitFactor){ CreateLabel("hdr_pf",      cx, y+2, "盈亏比",    ColorGray); cx += ColW_PF; }
-}
-
-//==========================================================================
-// 绘制一行统计数据
-//==========================================================================
-void DrawStatRow(string rowId, int x, int y, int panelW, StatSummary &s, bool isOdd, bool isTotal)
-{
-    color rowBg = isOdd ? ColorRowOdd : ColorRowEven;
-    if(isTotal) rowBg = ColorHeader;
-    CreateRect("row_bg_" + rowId, x, y, panelW, ROW_H, rowBg);
-
-    int cx = x + 2;
-    color labelClr = isTotal ? ColorGray : (s.isOpen ? clrYellow : ColorGray);
-    CreateLabel("row_lbl_" + rowId, cx, y+1, s.label, labelClr);
-    cx += ColW_Label;
-
-    color pclr = GetProfitColor(s.profit);
-
-    if(Show_Lots)
+    string headers[17];
+    headers[0]="日期"; headers[1]="总手数"; headers[2]="最小大手数"; headers[3]="次数";
+    headers[4]="盈亏金额"; headers[5]="百分比%"; headers[6]="手续费"; headers[7]="库存费";
+    headers[8]="出入金"; headers[9]="余额"; headers[10]="最大浮亏"; headers[11]="最大浮亏比例";
+    headers[12]="最大浮盈金额"; headers[13]="最大浮盈比例"; headers[14]="最小平均最大持仓时间";
+    headers[15]="胜率"; headers[16]="盈亏比";
+    headers[0] = labelCol;
+    int cx = x;
+    for(int i=0; i<17; i++)
     {
-        string lotsStr = DoubleToString(s.totalLots, 2);
-        CreateLabel("row_lots_" + rowId, cx, y+1, lotsStr, ColorGreen);
-        cx += ColW_Lots;
-    }
-    if(Show_MaxLots)
-    {
-        string maxLotsStr = DoubleToString(s.minLots, 2) + "|" + DoubleToString(s.maxLots, 2);
-        CreateLabel("row_maxlots_" + rowId, cx, y+1, maxLotsStr, ColorGray);
-        cx += ColW_MaxLots;
-    }
-    if(Show_Count)
-    {
-        CreateLabel("row_cnt_" + rowId, cx, y+1, IntegerToString(s.count), ColorGray);
-        cx += ColW_Count;
-    }
-    if(Show_Profit)
-    {
-        CreateLabel("row_pft_" + rowId, cx, y+1, DoubleToString(s.profit, 2), pclr);
-        cx += ColW_Profit;
-    }
-    if(Show_ProfitPct)
-    {
-        string pctStr = DoubleToString(s.profitPct, 2) + " %";
-        CreateLabel("row_pct_" + rowId, cx, y+1, pctStr, pclr);
-        cx += ColW_ProfitPct;
-    }
-    if(Show_Commission)
-    {
-        CreateLabel("row_comm_" + rowId, cx, y+1, DoubleToString(s.commission, 2), ColorRed);
-        cx += ColW_Comm;
-    }
-    if(Show_Swap)
-    {
-        CreateLabel("row_swap_" + rowId, cx, y+1, DoubleToString(s.swap, 2), ColorRed);
-        cx += ColW_Swap;
-    }
-    if(Show_Deposit)
-    {
-        CreateLabel("row_dep_" + rowId, cx, y+1, DoubleToString(s.deposit, 2), ColorGray);
-        cx += ColW_Deposit;
-    }
-    if(Show_Balance)
-    {
-        CreateLabel("row_bal_" + rowId, cx, y+1, DoubleToString(s.balance, 2), ColorGray);
-        cx += ColW_Balance;
-    }
-    if(Show_MaxDD)
-    {
-        CreateLabel("row_mdd_" + rowId, cx, y+1, DoubleToString(s.maxDD, 2), ColorRed);
-        cx += ColW_MaxDD;
-    }
-    if(Show_MaxDDPct)
-    {
-        string mddpStr = DoubleToString(s.maxDDPct, 2) + " %";
-        CreateLabel("row_mddp_" + rowId, cx, y+1, mddpStr, ColorRed);
-        cx += ColW_MaxDDPct;
-    }
-    if(Show_MaxFloat)
-    {
-        CreateLabel("row_mfl_" + rowId, cx, y+1, DoubleToString(s.maxFloat, 2), ColorGreen);
-        cx += ColW_MaxFloat;
-    }
-    if(Show_MaxFloatPct)
-    {
-        string mflpStr = DoubleToString(s.maxFloatPct, 2) + " %";
-        CreateLabel("row_mflp_" + rowId, cx, y+1, mflpStr, ColorGreen);
-        cx += ColW_MaxFloatPct;
-    }
-    if(Show_HoldTime)
-    {
-        string holdStr = FormatTime(s.minHoldSec) + "|" + FormatTime(s.avgHoldSec) + "|" + FormatTime(s.maxHoldSec);
-        CreateLabel("row_hold_" + rowId, cx, y+1, holdStr, ColorGray);
-        cx += ColW_HoldTime;
-    }
-    if(Show_WinRate)
-    {
-        string wrStr = DoubleToString(s.winRate, 2) + " %";
-        CreateLabel("row_wr_" + rowId, cx, y+1, wrStr, ColorGreen);
-        cx += ColW_WinRate;
-    }
-    if(Show_ProfitFactor)
-    {
-        CreateLabel("row_pf_" + rowId, cx, y+1, DoubleToString(s.profitFactor, 2), ColorGreen);
-        cx += ColW_PF;
+        string nm = g_prefix + "hdr_" + IntegerToString(i);
+        MakeLabel(nm, cx+2, y+1, headers[i], ColorHeader, FontSize-1);
+        cx += g_colW[i];
     }
 }
 
 //==========================================================================
-// 绘制净值曲线（像素坐标系，在面板内部绘制）
+// 绘制统计行
 //==========================================================================
-void DrawEquityCurve(int panelX, int panelY, int panelW)
+int DrawStatRow(string rowId, int x, int y, StatRow &s, bool isHolding)
 {
-    // 删除旧曲线对象
-    int total = ObjectsTotal();
-    for(int i=total-1; i>=0; i--)
+    int cx = x;
+    color lc = (s.profit >= 0) ? ColorProfit : ColorLoss;
+    if(isHolding) lc = clrAqua;
+    
+    string nm;
+    
+    // 0: 标签
+    nm = g_prefix + rowId + "_0";
+    MakeLabel(nm, cx+2, y+1, s.label, lc, FontSize);
+    cx += g_colW[0];
+    
+    // 1: 总手数
+    nm = g_prefix + rowId + "_1";
+    MakeLabel(nm, cx+2, y+1, FormatLots(s.lots), ColorNeutral, FontSize);
+    cx += g_colW[1];
+    
+    // 2: 最小|大手数
+    nm = g_prefix + rowId + "_2";
+    string lotsStr = FormatLots(s.minLots) + "|" + FormatLots(s.maxLots);
+    MakeLabel(nm, cx+2, y+1, lotsStr, ColorNeutral, FontSize);
+    cx += g_colW[2];
+    
+    // 3: 次数
+    nm = g_prefix + rowId + "_3";
+    MakeLabel(nm, cx+2, y+1, IntegerToString(s.count), ColorNeutral, FontSize);
+    cx += g_colW[3];
+    
+    // 4: 盈亏金额
+    nm = g_prefix + rowId + "_4";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.profit), ProfitColor(s.profit), FontSize);
+    cx += g_colW[4];
+    
+    // 5: 百分比%
+    nm = g_prefix + rowId + "_5";
+    MakeLabel(nm, cx+2, y+1, FormatPct(s.pct), ProfitColor(s.pct), FontSize);
+    cx += g_colW[5];
+    
+    // 6: 手续费
+    nm = g_prefix + rowId + "_6";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.commission), ProfitColor(s.commission), FontSize);
+    cx += g_colW[6];
+    
+    // 7: 库存费
+    nm = g_prefix + rowId + "_7";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.swap), ProfitColor(s.swap), FontSize);
+    cx += g_colW[7];
+    
+    // 8: 出入金
+    nm = g_prefix + rowId + "_8";
+    MakeLabel(nm, cx+2, y+1, (s.deposit != 0) ? FormatMoney(s.deposit) : "0.00", ColorNeutral, FontSize);
+    cx += g_colW[8];
+    
+    // 9: 余额
+    nm = g_prefix + rowId + "_9";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.balance), ColorNeutral, FontSize);
+    cx += g_colW[9];
+    
+    // 10: 最大浮亏
+    nm = g_prefix + rowId + "_10";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.maxDD), ProfitColor(s.maxDD), FontSize);
+    cx += g_colW[10];
+    
+    // 11: 最大浮亏比例
+    nm = g_prefix + rowId + "_11";
+    MakeLabel(nm, cx+2, y+1, FormatPct(s.maxDDPct), ProfitColor(s.maxDDPct), FontSize);
+    cx += g_colW[11];
+    
+    // 12: 最大浮盈金额
+    nm = g_prefix + rowId + "_12";
+    MakeLabel(nm, cx+2, y+1, FormatMoney(s.maxProfit), ProfitColor(s.maxProfit), FontSize);
+    cx += g_colW[12];
+    
+    // 13: 最大浮盈比例
+    nm = g_prefix + rowId + "_13";
+    MakeLabel(nm, cx+2, y+1, FormatPct(s.maxProfitPct), ProfitColor(s.maxProfitPct), FontSize);
+    cx += g_colW[13];
+    
+    // 14: 最小|平均|最大持仓时间
+    nm = g_prefix + rowId + "_14";
+    MakeLabel(nm, cx+2, y+1, FormatMinMaxDuration(s.minDuration, s.avgDuration, s.maxDuration), ColorNeutral, FontSize);
+    cx += g_colW[14];
+    
+    // 15: 胜率
+    nm = g_prefix + rowId + "_15";
+    MakeLabel(nm, cx+2, y+1, FormatPct(s.winRate), ProfitColor(s.winRate - 0.5), FontSize);
+    cx += g_colW[15];
+    
+    // 16: 盈亏比
+    nm = g_prefix + rowId + "_16";
+    MakeLabel(nm, cx+2, y+1, DoubleToString(s.plRatio, 2), ProfitColor(s.plRatio - 1.0), FontSize);
+    
+    return ROW_H;
+}
+
+//==========================================================================
+// 绘制收益曲线（像素坐标，仅用于非综合tab）
+//==========================================================================
+void DrawEquityCurve(int x, int y, int w, int h)
+{
+    // 清除旧曲线
+    for(int i=ObjectsTotal(0)-1; i>=0; i--)
     {
-        string name = ObjectName(i);
-        if(StringFind(name, PREFIX + "eq_") == 0)
-            ObjectDelete(name);
+        string nm = ObjectName(0, i);
+        if(StringFind(nm, g_prefix+"curve_") == 0)
+            ObjectDelete(0, nm);
     }
-
-    if(g_equityCount < 2) return;
-
-    // 找最大最小値
-    double maxVal = g_equityCurve[0];
-    double minVal = g_equityCurve[0];
-    for(int i=1; i<g_equityCount; i++)
+    
+    if(g_curveCount < 2 || h < 10) return;
+    
+    // 找最大最小值
+    double minV = g_curveVals[0], maxV = g_curveVals[0];
+    for(int i=1; i<g_curveCount; i++)
     {
-        if(g_equityCurve[i] > maxVal) maxVal = g_equityCurve[i];
-        if(g_equityCurve[i] < minVal) minVal = g_equityCurve[i];
+        if(g_curveVals[i] < minV) minV = g_curveVals[i];
+        if(g_curveVals[i] > maxV) maxV = g_curveVals[i];
     }
-    if(maxVal == minVal) { maxVal += 1; minVal -= 1; }
-    double valRange = maxVal - minVal;
-
-    // 图表区域像素范围
-    int chartAreaX = panelX;
-    int chartAreaY = panelY + TITLE_H + TAB_H;
-    int chartAreaW = panelW;
-    int chartAreaH = CHART_H;
+    double range = maxV - minV;
+    if(range < 1) range = 1;
+    
     int margin = 5;
-    int drawW = chartAreaW - margin * 2;
-    int drawH = chartAreaH - margin * 2;
-
-    // 将数据点映射到像素坐标
-    int px[];
-    int py2[];
-    ArrayResize(px, g_equityCount);
-    ArrayResize(py2, g_equityCount);
-
-    for(int i=0; i<g_equityCount; i++)
+    int drawH = h - 2*margin;
+    int drawW = w - 2*margin;
+    
+    // 绘制曲线线段（用细矩形近似）
+    int prevPx = -1, prevPy = -1;
+    for(int i=0; i<g_curveCount; i++)
     {
-        // X坐标：按时间线性分布
-        px[i] = chartAreaX + margin + (int)((double)i / (double)(g_equityCount - 1) * drawW);
-        // Y坐标：高值在上，低値在下
-        double ratio = (g_equityCurve[i] - minVal) / valRange;
-        py2[i] = chartAreaY + margin + drawH - (int)(ratio * drawH);
-    }
-
-    // 用细矩形模拟线段（每两个相邻点之间画一条线）
-    for(int i=0; i<g_equityCount-1; i++)
-    {
-        int x1 = px[i],  y1 = py2[i];
-        int x2 = px[i+1], y2 = py2[i+1];
-
-        // 用小矩形模拟线段：将线段分解为水平和垂直分量
-        string sname = PREFIX + "eq_seg_" + IntegerToString(i);
-
-        int dx = x2 - x1;
-        int dy = y2 - y1;
-        int steps = MathMax(MathAbs(dx), MathAbs(dy));
-        if(steps <= 0) steps = 1;
-
-        // 简化：只绘制水平线段（将线段用一个矩形表示）
-        // 使用 OBJ_RECTANGLE_LABEL 画一个细矩形表示线段
-        // 对于斜线，用多个小点近似
-        int numDots = MathMax(MathAbs(dx), 1);
-        for(int d=0; d<numDots; d++)
+        int px = x + margin + (int)((double)i / (g_curveCount-1) * drawW);
+        int py = y + margin + (int)((maxV - g_curveVals[i]) / range * drawH);
+        
+        if(prevPx >= 0)
         {
-            int dotX = x1 + (int)((double)d / numDots * dx);
-            int dotY = y1 + (int)((double)d / numDots * dy);
-            string dname = PREFIX + "eq_dot_" + IntegerToString(i) + "_" + IntegerToString(d);
-            if(ObjectFind(dname) < 0)
-                ObjectCreate(0, dname, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-            ObjectSetInteger(0, dname, OBJPROP_XDISTANCE, dotX);
-            ObjectSetInteger(0, dname, OBJPROP_YDISTANCE, dotY);
-            ObjectSetInteger(0, dname, OBJPROP_XSIZE, 2);
-            ObjectSetInteger(0, dname, OBJPROP_YSIZE, 2);
-            ObjectSetInteger(0, dname, OBJPROP_BGCOLOR, ColorEquityLine);
-            ObjectSetInteger(0, dname, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-            ObjectSetInteger(0, dname, OBJPROP_COLOR, ColorEquityLine);
-            ObjectSetInteger(0, dname, OBJPROP_BACK, false);
-            ObjectSetInteger(0, dname, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, dname, OBJPROP_HIDDEN, true);
-            ObjectSetInteger(0, dname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+            // 在两点之间绘制线段（用小矩形点）
+            int dx = px - prevPx;
+            int dy = py - prevPy;
+            int steps = MathMax(MathAbs(dx), MathAbs(dy));
+            if(steps < 1) steps = 1;
+            for(int s=0; s<=steps; s++)
+            {
+                int lx = prevPx + (int)((double)s/steps * dx);
+                int ly = prevPy + (int)((double)s/steps * dy);
+                string nm = g_prefix + "curve_" + IntegerToString(i) + "_" + IntegerToString(s);
+                MakeRect(nm, lx, ly, 1, 1, ColorCurve);
+            }
         }
+        prevPx = px;
+        prevPy = py;
     }
-
-    // 在曲线两端显示日期标注
-    if(g_equityCount >= 2)
+    
+    // 绘制起止日期标签
+    if(g_curveCount > 0)
     {
-        string lname = PREFIX + "eq_lbl_left";
-        if(ObjectFind(lname) < 0) ObjectCreate(0, lname, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, lname, OBJPROP_XDISTANCE, chartAreaX + margin);
-        ObjectSetInteger(0, lname, OBJPROP_YDISTANCE, chartAreaY + chartAreaH - FontSize - 2);
-        ObjectSetString(0, lname, OBJPROP_TEXT, TimeToStr(g_equityTime[0], TIME_DATE));
-        ObjectSetInteger(0, lname, OBJPROP_COLOR, ColorDimGray);
-        ObjectSetInteger(0, lname, OBJPROP_FONTSIZE, FontSize - 1);
-        ObjectSetString(0, lname, OBJPROP_FONT, "Arial");
-        ObjectSetInteger(0, lname, OBJPROP_BACK, false);
-        ObjectSetInteger(0, lname, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, lname, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, lname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, lname, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
-
-        string rname = PREFIX + "eq_lbl_right";
-        if(ObjectFind(rname) < 0) ObjectCreate(0, rname, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, rname, OBJPROP_XDISTANCE, chartAreaX + chartAreaW - margin);
-        ObjectSetInteger(0, rname, OBJPROP_YDISTANCE, chartAreaY + chartAreaH - FontSize - 2);
-        ObjectSetString(0, rname, OBJPROP_TEXT, TimeToStr(g_equityTime[g_equityCount-1], TIME_DATE));
-        ObjectSetInteger(0, rname, OBJPROP_COLOR, ColorDimGray);
-        ObjectSetInteger(0, rname, OBJPROP_FONTSIZE, FontSize - 1);
-        ObjectSetString(0, rname, OBJPROP_FONT, "Arial");
-        ObjectSetInteger(0, rname, OBJPROP_BACK, false);
-        ObjectSetInteger(0, rname, OBJPROP_SELECTABLE, false);
-        ObjectSetInteger(0, rname, OBJPROP_HIDDEN, true);
-        ObjectSetInteger(0, rname, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, rname, OBJPROP_ANCHOR, ANCHOR_RIGHT_UPPER);
-    }
-}
-
-
-//==========================================================================
-// 绘制综合视图（综 TAB）
-//==========================================================================
-void DrawSummaryTab(int px, int py, int panelW, int chartH)
-{
-    int y = py + TITLE_H + TAB_H + chartH;
-    int x = px;
-
-    // 计算综合统计（持仓+最近N天）
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
-    // 持仓行
-    StatSummary openStat;
-    InitStat(openStat);
-    openStat.label = "持仓";
-    openStat.isOpen = true;
-    double openProfit = 0;
-    double openLots = 0;
-    int openBuyCount = 0, openSellCount = 0;
-    double openBuyLots = 0, openSellLots = 0;
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime != 0) continue;
-        openStat.count++;
-        openStat.totalLots += g_trades[i].lots;
-        if(g_trades[i].lots < openStat.minLots) openStat.minLots = g_trades[i].lots;
-        if(g_trades[i].lots > openStat.maxLots) openStat.maxLots = g_trades[i].lots;
-        openStat.profit     += g_trades[i].profit;
-        openStat.commission += g_trades[i].commission;
-        openStat.swap       += g_trades[i].swap;
-        if(g_trades[i].type == OP_BUY)  { openBuyCount++;  openBuyLots  += g_trades[i].lots; }
-        else                             { openSellCount++; openSellLots += g_trades[i].lots; }
-    }
-    if(openStat.minLots >= 999999) openStat.minLots = 0;
-    openStat.profitPct = openStat.profit / baseBalance * 100.0;
-    openStat.balance   = AccountEquity();
-
-    DrawTableHeader(x, y, panelW, "持仓");
-    y += HEADER_H;
-
-    DrawStatRow("open", x, y, panelW, openStat, true, false);
-    y += ROW_H;
-
-    // 最近N天
-    int showDays = MathMin(Summary_DayCount, g_dayCount);
-    for(int di=0; di<showDays; di++)
-    {
-        bool odd = (di % 2 == 0);
-        DrawStatRow("sum_d" + IntegerToString(di), x, y, panelW, g_dayStat[di], odd, false);
-        y += ROW_H;
-    }
-
-    // 本周/本月/本季/本年盈亏汇总行
-
-    // 本周
-    StatSummary weekSum; InitStat(weekSum); weekSum.label = "本周盈亏";
-    datetime weekStart = GetWeekStart(TimeCurrent());
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        if(g_trades[i].closeTime < weekStart) continue;
-        AccumTrade(weekSum, g_trades[i], baseBalance);
-    }
-    FinalizeStat(weekSum, baseBalance);
-    DrawStatRow("sum_week", x, y, panelW, weekSum, true, false);
-    y += ROW_H;
-
-    // 本月
-    StatSummary monthSum; InitStat(monthSum); monthSum.label = "本月盈亏";
-    datetime monthStart = GetMonthStart(TimeCurrent());
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        if(g_trades[i].closeTime < monthStart) continue;
-        AccumTrade(monthSum, g_trades[i], baseBalance);
-    }
-    FinalizeStat(monthSum, baseBalance);
-    DrawStatRow("sum_month", x, y, panelW, monthSum, false, false);
-    y += ROW_H;
-
-    // 本季
-    StatSummary qSum; InitStat(qSum); qSum.label = "本季盈亏";
-    datetime qStart = GetQuarterStart(TimeCurrent());
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        if(g_trades[i].closeTime < qStart) continue;
-        AccumTrade(qSum, g_trades[i], baseBalance);
-    }
-    FinalizeStat(qSum, baseBalance);
-    DrawStatRow("sum_q", x, y, panelW, qSum, true, false);
-    y += ROW_H;
-
-    // 本年
-    StatSummary ySum; InitStat(ySum); ySum.label = "本年盈亏";
-    datetime yStart = GetYearStart(TimeCurrent());
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        if(g_trades[i].closeTime < yStart) continue;
-        AccumTrade(ySum, g_trades[i], baseBalance);
-    }
-    FinalizeStat(ySum, baseBalance);
-    DrawStatRow("sum_y", x, y, panelW, ySum, false, false);
-    y += ROW_H;
-
-    // 账户持仓汇总
-    if(Summary_ShowOpen)
-    {
-        y += 4;
-        CreateLabel("sum_magic", x+2, y, "账户持仓汇总，Magic=" + FilterMagic, ColorGray);
-        y += ROW_H;
-        CreateLabel("sum_buy", x+2, y,
-            "多单Buy  单数: " + IntegerToString(openBuyCount) +
-            "  手数: " + DoubleToString(openBuyLots, 2) +
-            "  盈亏: " + DoubleToString(openStat.profit, 2), ColorGreen);
-        y += ROW_H;
-        CreateLabel("sum_sell", x+2, y,
-            "空单Sell  单数: " + IntegerToString(openSellCount) +
-            "  手数: " + DoubleToString(openSellLots, 2), ColorRed);
-        y += ROW_H;
+        MakeLabel(g_prefix+"curve_lbl_l", x+margin, y+h-12, g_curveLabels[0], ColorLabel, FontSize-1);
+        MakeLabel(g_prefix+"curve_lbl_r", x+w-60, y+h-12, g_curveLabels[g_curveCount-1], ColorLabel, FontSize-1);
     }
 }
 
 //==========================================================================
-// 绘制时间维度视图（日/周/月/季/年）
-//==========================================================================
-void DrawTimeTab(int px, int py, int panelW, string tab)
-{
-    int y = py + TITLE_H + TAB_H + CHART_H;
-    int x = px;
-
-    int count = 0;
-    string headerLabel = "";
-
-    StatSummary openStat; InitStat(openStat);
-    openStat.label = "持仓"; openStat.isOpen = true;
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime != 0) continue;
-        openStat.count++;
-        openStat.totalLots += g_trades[i].lots;
-        if(g_trades[i].lots < openStat.minLots) openStat.minLots = g_trades[i].lots;
-        if(g_trades[i].lots > openStat.maxLots) openStat.maxLots = g_trades[i].lots;
-        openStat.profit     += g_trades[i].profit;
-        openStat.commission += g_trades[i].commission;
-        openStat.swap       += g_trades[i].swap;
-    }
-    if(openStat.minLots >= 999999) openStat.minLots = 0;
-    openStat.profitPct = openStat.profit / baseBalance * 100.0;
-    openStat.balance   = AccountEquity();
-
-    if(tab == "日")      { count = g_dayCount;     headerLabel = "日期"; }
-    else if(tab == "周") { count = g_weekCount;    headerLabel = "周"; }
-    else if(tab == "月") { count = g_monthCount;   headerLabel = "月份"; }
-    else if(tab == "季") { count = g_quarterCount; headerLabel = "季度"; }
-    else if(tab == "年") { count = g_yearCount;    headerLabel = "年份"; }
-
-    DrawTableHeader(x, y, panelW, headerLabel);
-    y += HEADER_H;
-
-    // 持仓行
-    DrawStatRow("tt_open", x, y, panelW, openStat, true, false);
-    y += ROW_H;
-
-    // 各期数据
-    for(int i=0; i<count; i++)
-    {
-        bool odd = (i % 2 == 0);
-        StatSummary rowStat;
-        if(tab == "日")      rowStat = g_dayStat[i];
-        else if(tab == "周") rowStat = g_weekStat[i];
-        else if(tab == "月") rowStat = g_monthStat[i];
-        else if(tab == "季") rowStat = g_quarterStat[i];
-        else                 rowStat = g_yearStat[i];
-        DrawStatRow("tt_" + IntegerToString(i), x, y, panelW, rowStat, odd, false);
-        y += ROW_H;
-    }
-
-    // 合计行
-    StatSummary totalStat; InitStat(totalStat); totalStat.label = "合计";
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        AccumTrade(totalStat, g_trades[i], baseBalance);
-    }
-    FinalizeStat(totalStat, baseBalance);
-    totalStat.balance = AccountBalance();
-    DrawStatRow("tt_total", x, y, panelW, totalStat, false, true);
-}
-
-//==========================================================================
-// 绘制品种/Magic/备注视图
-//==========================================================================
-void DrawGroupTab(int px, int py, int panelW, string tab)
-{
-    int y = py + TITLE_H + TAB_H + CHART_H;
-    int x = px;
-
-    int count = 0;
-    string headerLabel = "";
-
-    if(tab == "币")      { count = g_symbolCount;  headerLabel = "品种"; }
-    else if(tab == "M")  { count = g_magicCount;   headerLabel = "Magic"; }
-    else if(tab == "备") { count = g_commentCount; headerLabel = "备注"; }
-
-    // 表头（品种视图列略有不同，简化处理）
-    DrawTableHeader(x, y, panelW, headerLabel);
-    y += HEADER_H;
-
-    for(int i=0; i<count; i++)
-    {
-        bool odd = (i % 2 == 0);
-        StatSummary rowStat;
-        if(tab == "币")      rowStat = g_symbolStat[i];
-        else if(tab == "M")  rowStat = g_magicStat[i];
-        else                 rowStat = g_commentStat[i];
-        DrawStatRow("grp_" + IntegerToString(i), x, y, panelW, rowStat, odd, false);
-        y += ROW_H;
-    }
-
-    // 合计行
-    double baseBalance = AccountBalance();
-    if(baseBalance <= 0) baseBalance = 1;
-    StatSummary totalStat; InitStat(totalStat); totalStat.label = "合计";
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        AccumTrade(totalStat, g_trades[i], baseBalance);
-    }
-    FinalizeStat(totalStat, baseBalance);
-    DrawStatRow("grp_total", x, y, panelW, totalStat, false, true);
-}
-
-//==========================================================================
-// 绘制账户信息视图
-//==========================================================================
-void DrawAccountTab(int px, int py, int panelW)
-{
-    int y = py + TITLE_H + TAB_H + CHART_H;
-    int x = px + 5;
-    int lineH = 18;
-    int col2x = x + 300;
-
-    color lc = ColorGray;
-    color vc = ColorGreen;
-
-    CreateLabel("acc_path_lbl",  x, y, "MT4路径=", lc);
-    CreateLabel("acc_path_val",  x+80, y, TerminalPath(), vc);
-    y += lineH;
-
-    CreateLabel("acc_id_lbl",    x, y, "账户ID=", lc);
-    CreateLabel("acc_id_val",    x+80, y, IntegerToString(AccountNumber()), vc);
-    CreateLabel("acc_broker_lbl",col2x, y, "经纪商=", lc);
-    CreateLabel("acc_broker_val",col2x+80, y, AccountCompany(), vc);
-    y += lineH;
-
-    CreateLabel("acc_lev_lbl",   x, y, "账户杠杆=", lc);
-    CreateLabel("acc_lev_val",   x+80, y, "1:" + IntegerToString(AccountLeverage()), vc);
-    CreateLabel("acc_type_lbl",  col2x, y, "账户类型=", lc);
-    string accType = IsDemo() ? "模拟" : "真实";
-    CreateLabel("acc_type_val",  col2x+80, y, accType, vc);
-    y += lineH;
-
-    CreateLabel("acc_minlot_lbl",x, y, "最小手数=", lc);
-    CreateLabel("acc_minlot_val",x+80, y, DoubleToString(MarketInfo(Symbol(), MODE_MINLOT), 2), vc);
-    CreateLabel("acc_maxord_lbl",col2x, y, "最大可开单数量=", lc);
-    CreateLabel("acc_maxord_val",col2x+120, y, "200 个", vc);
-    y += lineH;
-
-    CreateLabel("acc_maxlot_lbl",x, y, "最大手数=", lc);
-    CreateLabel("acc_maxlot_val",x+80, y, DoubleToString(MarketInfo(Symbol(), MODE_MAXLOT), 2), vc);
-    y += lineH;
-
-    CreateLabel("acc_marg_lbl",  x, y, "强平比例=", lc);
-    double marginSO = AccountStopoutLevel();
-    CreateLabel("acc_marg_val",  x+80, y, DoubleToString(marginSO, 0) + " % （最低 预付款比例 = 净值/已用保证金，低于此比例会被强平）", vc);
-    y += lineH;
-
-    CreateLabel("acc_free_lbl",  x, y, "余额=", lc);
-    CreateLabel("acc_free_val",  x+80, y, DoubleToString(AccountBalance(), 2), vc);
-    CreateLabel("acc_equity_lbl",col2x, y, "净值=", lc);
-    CreateLabel("acc_equity_val",col2x+80, y, DoubleToString(AccountEquity(), 2), vc);
-    y += lineH;
-
-    CreateLabel("acc_margin_lbl",x, y, "已用保证金=", lc);
-    CreateLabel("acc_margin_val",x+80, y, DoubleToString(AccountMargin(), 2), vc);
-    CreateLabel("acc_fmarg_lbl", col2x, y, "可用保证金=", lc);
-    CreateLabel("acc_fmarg_val", col2x+80, y, DoubleToString(AccountFreeMargin(), 2), vc);
-    y += lineH;
-
-    CreateLabel("acc_cur_lbl",   x, y, "结算货币=", lc);
-    CreateLabel("acc_cur_val",   x+80, y, AccountCurrency() + " (美元)", vc);
-    CreateLabel("acc_time_lbl",  col2x, y, "本地时间=", lc);
-    CreateLabel("acc_time_val",  col2x+80, y, TimeToStr(TimeLocal(), TIME_DATE|TIME_MINUTES|TIME_SECONDS), vc);
-    y += lineH;
-
-    CreateLabel("acc_ecn_lbl",   x, y, "是否ECN=", lc);
-    // ACCOUNT_TRADE_EXEMODE: 0=instant, 1=request, 2=market, 3=exchange
-    // MQL4 does not have a direct ECN check, use AccountStopoutMode as proxy
-    string isECN = (AccountStopoutMode() == 0) ? "Yes（每手手续费=6）" : "No";
-    CreateLabel("acc_ecn_val",   x+80, y, isECN, vc);
-    y += lineH * 2;
-
-    // 当前品种信息
-    CreateLabel("acc_sym_hdr",   x, y, "[" + Symbol() + "]", ColorGreen, FontSize+1);
-    y += lineH;
-
-    CreateLabel("acc_margin2_lbl",x, y, "手保证金=", lc);
-    CreateLabel("acc_margin2_val",x+80, y, DoubleToString(MarketInfo(Symbol(), MODE_MARGINREQUIRED), 2), vc);
-    CreateLabel("acc_pts_lbl",   col2x, y, "点差=", lc);
-    CreateLabel("acc_pts_val",   col2x+80, y, IntegerToString((int)(MarketInfo(Symbol(), MODE_SPREAD))) + " 点（以价格计=" + DoubleToString(MarketInfo(Symbol(), MODE_SPREAD)*Point, Digits) + "）", vc);
-    y += lineH;
-
-    CreateLabel("acc_point_lbl", x, y, "Point=", lc);
-    CreateLabel("acc_point_val", x+80, y, DoubleToString(Point, Digits), vc);
-    y += lineH;
-
-    CreateLabel("acc_openlot_lbl",x, y, "可开手数=", lc);
-    double freeMarg = AccountFreeMargin();
-    double margReq  = MarketInfo(Symbol(), MODE_MARGINREQUIRED);
-    double maxLotsByMarg = (margReq > 0) ? freeMarg / margReq : 0;
-    CreateLabel("acc_openlot_val",x+80, y, DoubleToString(maxLotsByMarg, 2), vc);
-    y += lineH;
-
-    CreateLabel("acc_sl_lbl",    x, y, "最小止损间距=", lc);
-    CreateLabel("acc_sl_val",    x+80, y, IntegerToString((int)MarketInfo(Symbol(), MODE_STOPLEVEL)) + " 点 (STOPLEVEL)", vc);
-    y += lineH;
-
-    CreateLabel("acc_tickval_lbl",x, y, "手均震动额=", lc);
-    double tickVal = MarketInfo(Symbol(), MODE_TICKVALUE);
-    double tickSize = MarketInfo(Symbol(), MODE_TICKSIZE);
-    double lotSize  = MarketInfo(Symbol(), MODE_LOTSIZE);
-    CreateLabel("acc_tickval_val",x+80, y, DoubleToString(tickVal * lotSize / tickSize, 2) + " USD", vc);
-    y += lineH;
-
-    CreateLabel("acc_cost_lbl",  x, y, "成本占比=", lc);
-    double spread = MarketInfo(Symbol(), MODE_SPREAD) * Point;
-    double costPct = (Ask > 0) ? spread / Ask * 100.0 : 0;
-    CreateLabel("acc_cost_val",  x+80, y, DoubleToString(costPct, 2) + "% (" + IntegerToString((int)MarketInfo(Symbol(), MODE_SPREAD)) + ")", vc);
-}
-
-//==========================================================================
-// 绘制轨迹视图
-//==========================================================================
-void DrawTrailTab(int px, int py, int panelW)
-{
-    int y = py + TITLE_H + TAB_H + CHART_H;
-    int x = px + 5;
-
-    CreateLabel("trail_info", x, y, "轨迹功能：点击日/周/月/季/年视图中的行可在图表上显示该期间的交易路径", ColorGray);
-    y += ROW_H * 2;
-
-    if(g_selectedRow < 0)
-    {
-        CreateLabel("trail_hint", x, y, "请在其他标签页点击某行以查看轨迹", ColorDimGray);
-        return;
-    }
-
-    // 显示选中期间的所有交易路径
-    CreateLabel("trail_period", x, y, "当前显示期间: " + g_selectedPeriod, ColorGreen);
-    y += ROW_H;
-
-    // 绘制轨迹（在图表上标注开平仓点）
-    int trailIdx = 0;
-    for(int i=0; i<g_tradeCount; i++)
-    {
-        if(g_trades[i].closeTime == 0) continue;
-        string d = "";
-        if(g_currentTab == "日") d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
-        else if(g_currentTab == "周") d = GetWeekLabel(g_trades[i].closeTime);
-        else if(g_currentTab == "月") d = GetMonthLabel(g_trades[i].closeTime);
-        else if(g_currentTab == "季") d = GetQuarterLabel(g_trades[i].closeTime);
-        else if(g_currentTab == "年") d = GetYearLabel(g_trades[i].closeTime);
-
-        if(d != g_selectedPeriod) continue;
-
-        // 开仓箭头
-        string openName = PREFIX + "trail_open_" + IntegerToString(trailIdx);
-        if(ObjectFind(openName) < 0)
-            ObjectCreate(0, openName, OBJ_ARROW, 0, g_trades[i].openTime, g_trades[i].openPrice);
-        ObjectSetInteger(0, openName, OBJPROP_TIME1, g_trades[i].openTime);
-        ObjectSetDouble(0, openName, OBJPROP_PRICE1, g_trades[i].openPrice);
-        ObjectSetInteger(0, openName, OBJPROP_ARROWCODE, (g_trades[i].type == OP_BUY) ? 233 : 234);
-        ObjectSetInteger(0, openName, OBJPROP_COLOR, (g_trades[i].type == OP_BUY) ? TrailColor_Buy : TrailColor_Sell);
-        ObjectSetInteger(0, openName, OBJPROP_WIDTH, 2);
-        ObjectSetInteger(0, openName, OBJPROP_BACK, false);
-        ObjectSetInteger(0, openName, OBJPROP_SELECTABLE, false);
-
-        // 平仓箭头
-        if(g_trades[i].closeTime > 0)
-        {
-            string closeName = PREFIX + "trail_close_" + IntegerToString(trailIdx);
-            if(ObjectFind(closeName) < 0)
-                ObjectCreate(0, closeName, OBJ_ARROW, 0, g_trades[i].closeTime, g_trades[i].closePrice);
-            ObjectSetInteger(0, closeName, OBJPROP_TIME1, g_trades[i].closeTime);
-            ObjectSetDouble(0, closeName, OBJPROP_PRICE1, g_trades[i].closePrice);
-            ObjectSetInteger(0, closeName, OBJPROP_ARROWCODE, (g_trades[i].type == OP_BUY) ? 234 : 233);
-            ObjectSetInteger(0, closeName, OBJPROP_COLOR, (g_trades[i].type == OP_BUY) ? TrailColor_BuyAvg : TrailColor_SellAvg);
-            ObjectSetInteger(0, closeName, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, closeName, OBJPROP_BACK, false);
-            ObjectSetInteger(0, closeName, OBJPROP_SELECTABLE, false);
-
-            // 连线
-            string lineName = PREFIX + "trail_line_" + IntegerToString(trailIdx);
-            if(ObjectFind(lineName) < 0)
-                ObjectCreate(0, lineName, OBJ_TREND, 0, g_trades[i].openTime, g_trades[i].openPrice, g_trades[i].closeTime, g_trades[i].closePrice);
-            ObjectSetInteger(0, lineName, OBJPROP_TIME1, g_trades[i].openTime);
-            ObjectSetDouble(0, lineName, OBJPROP_PRICE1, g_trades[i].openPrice);
-            ObjectSetInteger(0, lineName, OBJPROP_TIME2, g_trades[i].closeTime);
-            ObjectSetDouble(0, lineName, OBJPROP_PRICE2, g_trades[i].closePrice);
-            ObjectSetInteger(0, lineName, OBJPROP_COLOR, (g_trades[i].type == OP_BUY) ? TrailColor_Buy : TrailColor_Sell);
-            ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 1);
-            ObjectSetInteger(0, lineName, OBJPROP_STYLE, STYLE_DOT);
-            ObjectSetInteger(0, lineName, OBJPROP_BACK, true);
-            ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
-            ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, false);
-            ObjectSetInteger(0, lineName, OBJPROP_RAY_LEFT, false);
-        }
-        trailIdx++;
-    }
-    CreateLabel("trail_count", x, y, "共显示 " + IntegerToString(trailIdx) + " 笔交易路径", ColorGray);
-}
-
-//==========================================================================
-// 主绘制函数
+// 主面板绘制
 //==========================================================================
 void DrawPanel()
 {
-    DeleteAllObjects();
-
-    int panelW = GetTotalPanelWidth();
-    if(panelW < 400) panelW = 400;
-    PANEL_W = panelW;
-
     int px = g_panelX;
     int py = g_panelY;
-
-    // 计算面板高度
-    int contentRows = 0;
-    if(g_currentTab == "综")      contentRows = 3 + MathMin(Summary_DayCount, g_dayCount) + 4 + (Summary_ShowOpen ? 3 : 0);
-    else if(g_currentTab == "日") contentRows = 2 + g_dayCount + 1;
-    else if(g_currentTab == "周") contentRows = 2 + g_weekCount + 1;
-    else if(g_currentTab == "月") contentRows = 2 + g_monthCount + 1;
-    else if(g_currentTab == "季") contentRows = 2 + g_quarterCount + 1;
-    else if(g_currentTab == "年") contentRows = 2 + g_yearCount + 1;
-    else if(g_currentTab == "币") contentRows = 2 + g_symbolCount + 1;
-    else if(g_currentTab == "M")  contentRows = 2 + g_magicCount + 1;
-    else if(g_currentTab == "备") contentRows = 2 + g_commentCount + 1;
-    else if(g_currentTab == "账户") contentRows = 20;
-    else if(g_currentTab == "轨迹") contentRows = 5;
-
-    int tableH = HEADER_H + contentRows * ROW_H + 10;
-    if(tableH < 60) tableH = 60;
-
-    // 综合视图不显示图表区域
-    bool showChart = (g_currentTab != "综");
-    int effectiveChartH = showChart ? CHART_H : 0;
-
-    // 折叠时面板高度仅为标题栏
-    int totalH = g_minimized ? TITLE_H : (TITLE_H + TAB_H + effectiveChartH + tableH);
-    PANEL_H = totalH;
-
-    // 主背景（折叠时只显示标题栏高度）
-    CreateRect("bg_main", px, py, panelW, totalH, ColorBG, 1, ColorBorder);
-
-    // 标题栏
-    CreateRect("bg_title", px, py, panelW, TITLE_H, ColorHeader);
-
-    // 左侧按钮
-    int btnSize = TITLE_H - 4;
-    CreateButton("btn_min",  px + 2,               py + 2, btnSize, btnSize, g_minimized ? "+" : "-", C'40,40,60', ColorGray, FontSize+2);
-    CreateButton("btn_move", px + 2 + btnSize + 2, py + 2, btnSize, btnSize, "+", C'40,40,60', ColorGray, FontSize+2);
-
-    // 标题文字
-    int titleX = px + 2 + (btnSize + 2) * 2 + 4;
-    string titleText = CustomTitle + "，M=" + FilterMagic;
-    CreateLabel("lbl_title", titleX, py+3, titleText, ColorGreen, FontSize+1);
-
-    if(g_minimized) { ChartRedraw(); return; }
-
-    // TAB栏
-    int tabX = px;
-    int tabW = 32;
-    for(int i=0; i<TAB_COUNT; i++)
+    int pw = Panel_Width;
+    
+    // 计算总高度
+    int totalH;
+    if(g_minimized)
+        totalH = TITLE_H;
+    else
+        totalH = TITLE_H + TAB_H + 2000; // 动态，先给大值
+    
+    // === 标题栏背景 ===
+    MakeRect(g_prefix+"bg_title", px, py, pw, TITLE_H, ColorTitle);
+    
+    // === 折叠按钮（左1）===
+    string minBtnText = g_minimized ? "+" : "-";
+    MakeRect(g_prefix+"btn_min_bg", px+2, py+2, 16, 16, C'50,50,80');
+    MakeLabel(g_prefix+"btn_min", px+4, py+2, minBtnText, clrWhite, FontSize+1);
+    
+    // === 移动按钮（左2）===
+    MakeRect(g_prefix+"btn_move_bg", px+20, py+2, 16, 16, C'50,50,80');
+    MakeLabel(g_prefix+"btn_move", px+22, py+2, "+", clrWhite, FontSize+1);
+    
+    // === 标题文字 ===
+    string titleStr = "MT4统计每一笔交易，M=";
+    if(Only_Magic != "") titleStr = "MT4统计每一笔交易，M=" + Only_Magic;
+    MakeLabel(g_prefix+"lbl_title", px+42, py+3, titleStr, clrLimeGreen, FontSize);
+    
+    if(g_minimized)
     {
-        bool isActive = (TABS[i] == g_currentTab);
-        color tabBg = isActive ? C'40,60,80' : ColorHeader;
-        color tabFg = isActive ? ColorGreen : ColorGray;
-        CreateButton("tab_" + TABS[i], tabX, py + TITLE_H, tabW, TAB_H, TABS[i], tabBg, tabFg, FontSize);
-        tabX += tabW + 1;
+        // 折叠时只显示标题栏
+        MakeRect(g_prefix+"bg_main", px, py, pw, TITLE_H, ColorBg);
+        MakeRect(g_prefix+"bg_title", px, py, pw, TITLE_H, ColorTitle);
+        // 重绘按钮（确保在背景之上）
+        MakeRect(g_prefix+"btn_min_bg", px+2, py+2, 16, 16, C'50,50,80');
+        MakeLabel(g_prefix+"btn_min", px+4, py+2, "+", clrWhite, FontSize+1);
+        MakeRect(g_prefix+"btn_move_bg", px+20, py+2, 16, 16, C'50,50,80');
+        MakeLabel(g_prefix+"btn_move", px+22, py+2, "+", clrWhite, FontSize+1);
+        MakeLabel(g_prefix+"lbl_title", px+42, py+3, titleStr, clrLimeGreen, FontSize);
+        return;
     }
-
-    // 图表区域（综合视图不显示）
-    if(showChart)
+    
+    // === 标签栏 ===
+        string tabs[11];
+        tabs[0]="综"; tabs[1]="日"; tabs[2]="周"; tabs[3]="月"; tabs[4]="季";
+        tabs[5]="年"; tabs[6]="币"; tabs[7]="M"; tabs[8]="备"; tabs[9]="账户"; tabs[10]="轨迹";
+        int tabCount = 11;
+        int tabW = 35;
+        int tabX = px;
+        int tabY = py + TITLE_H;
+    
+    MakeRect(g_prefix+"bg_tabs", px, tabY, pw, TAB_H, ColorTab);
+    
+    for(int i=0; i<tabCount; i++)
     {
-        CreateRect("bg_chart", px, py + TITLE_H + TAB_H, panelW, CHART_H, C'10,10,20', 1, ColorBorder);
-        DrawEquityCurve(px, py, panelW);
+        string tnm = g_prefix + "tab_" + tabs[i];
+        color tbg = (tabs[i] == g_activeTab) ? ColorTabActive : ColorTab;
+        int tw = (tabs[i] == "账户" || tabs[i] == "轨迹") ? 45 : tabW;
+        MakeRect(tnm+"_bg", tabX, tabY, tw, TAB_H, tbg);
+        MakeLabel(tnm, tabX+3, tabY+3, tabs[i], (tabs[i]==g_activeTab)?clrWhite:clrSilver, FontSize);
+        tabX += tw;
     }
-
-    // 内容区域背景
-    CreateRect("bg_content", px, py + TITLE_H + TAB_H + effectiveChartH, panelW, tableH, ColorBG);
-
-    // 根据当前TAB绘制内容
-    if(g_currentTab == "综")
-        DrawSummaryTab(px, py, panelW, effectiveChartH);
-    else if(g_currentTab == "日" || g_currentTab == "周" || g_currentTab == "月" ||
-            g_currentTab == "季" || g_currentTab == "年")
-        DrawTimeTab(px, py, panelW, g_currentTab);
-    else if(g_currentTab == "币" || g_currentTab == "M" || g_currentTab == "备")
-        DrawGroupTab(px, py, panelW, g_currentTab);
-    else if(g_currentTab == "账户")
-        DrawAccountTab(px, py, panelW);
-    else if(g_currentTab == "轨迹")
-        DrawTrailTab(px, py, panelW);
-
-    ChartRedraw();
+    
+    // === 内容区 ===
+    int contentY = tabY + TAB_H;
+    int contentH = 0;
+    
+    bool showCurve = (g_activeTab != "综" && g_activeTab != "账户" && g_activeTab != "轨迹");
+    int curveH = showCurve ? CHART_H_FULL : 0;
+    
+    // 曲线背景
+    if(showCurve)
+    {
+        MakeRect(g_prefix+"bg_curve", px, contentY, pw, curveH, C'10,10,20');
+        DrawEquityCurve(px, contentY, pw, curveH);
+        contentH += curveH;
+    }
+    else
+    {
+        // 删除旧曲线
+        for(int i=ObjectsTotal(0)-1; i>=0; i--)
+        {
+            string nm = ObjectName(0, i);
+            if(StringFind(nm, g_prefix+"curve_") == 0)
+                ObjectDelete(0, nm);
+        }
+    }
+    
+    int dataY = contentY + curveH;
+    int rowsDrawn = 0;
+    
+    if(g_activeTab == "综")
+        rowsDrawn = DrawSummaryTab(px, dataY);
+    else if(g_activeTab == "日")
+        rowsDrawn = DrawTimeTab(px, dataY, g_dayStat, g_dayCount, "日期");
+    else if(g_activeTab == "周")
+        rowsDrawn = DrawTimeTab(px, dataY, g_weekStat, g_weekCount, "周");
+    else if(g_activeTab == "月")
+        rowsDrawn = DrawTimeTab(px, dataY, g_monthStat, g_monthCount, "月份");
+    else if(g_activeTab == "季")
+        rowsDrawn = DrawTimeTab(px, dataY, g_quarterStat, g_quarterCount, "季度");
+    else if(g_activeTab == "年")
+        rowsDrawn = DrawTimeTab(px, dataY, g_yearStat, g_yearCount, "年份");
+    else if(g_activeTab == "币")
+        rowsDrawn = DrawTimeTab(px, dataY, g_symbolStat, g_symbolCount, "品种");
+    else if(g_activeTab == "M")
+        rowsDrawn = DrawTimeTab(px, dataY, g_magicStat, g_magicCount, "Magic");
+    else if(g_activeTab == "备")
+        rowsDrawn = DrawTimeTab(px, dataY, g_commentStat, g_commentCount, "备注");
+    else if(g_activeTab == "账户")
+        rowsDrawn = DrawAccountTab(px, dataY);
+    else if(g_activeTab == "轨迹")
+        rowsDrawn = DrawTrailTab(px, dataY);
+    
+    contentH += rowsDrawn * ROW_H + ROW_H + 4; // +header row
+    totalH = TITLE_H + TAB_H + contentH + 10;
+    
+    // 主背景（在最底层）
+    MakeRect(g_prefix+"bg_main", px, py, pw, totalH, ColorBg);
+    // 重绘标题栏（确保在背景之上）
+    MakeRect(g_prefix+"bg_title", px, py, pw, TITLE_H, ColorTitle);
+    MakeRect(g_prefix+"btn_min_bg", px+2, py+2, 16, 16, C'50,50,80');
+    MakeLabel(g_prefix+"btn_min", px+4, py+2, minBtnText, clrWhite, FontSize+1);
+    MakeRect(g_prefix+"btn_move_bg", px+20, py+2, 16, 16, C'50,50,80');
+    MakeLabel(g_prefix+"btn_move", px+22, py+2, "+", clrWhite, FontSize+1);
+    MakeLabel(g_prefix+"lbl_title", px+42, py+3, titleStr, clrLimeGreen, FontSize);
 }
 
-
 //==========================================================================
-// 全量刷新数据并重绘
+// 绘制时间/分组统计标签页
 //==========================================================================
-void RefreshAll()
+int DrawTimeTab(int x, int y, StatRow &arr[], int cnt, string labelCol)
 {
-    // 1. 先从CSV加载历史数据
-    CSV_LoadHistory();
-
-    // 2. 增量写入新的历史数据到CSV
-    CSV_SaveIncremental();
-
-    // 3. 加载近期（CSV_DaysBack天内）MT4历史数据（不写CSV）
-    LoadRecentFromMT4();
-
-    // 4. 加载当前持仓
-    LoadOpenOrders();
-
-    // 5. 加载出入金记录
-    LoadDeposits();
-
-    // 6. 计算所有统计
-    CalcAllStats();
-
-    // 7. 重绘面板
-    DrawPanel();
-
-    g_lastRefresh = TimeCurrent();
+    int cy = y;
+    
+    // 表头行背景
+    MakeRect(g_prefix+"hdr_bg", x, cy, Panel_Width, ROW_H, C'30,30,50');
+    DrawHeader(x, cy, labelCol);
+    cy += ROW_H;
+    
+    // 数据行
+    int drawn = 0;
+    for(int i=0; i<cnt; i++)
+    {
+        color rowBg = (i%2==0) ? C'15,15,25' : C'20,20,35';
+        MakeRect(g_prefix+"row_bg_"+IntegerToString(i), x, cy, Panel_Width, ROW_H, rowBg);
+        DrawStatRow("row_"+IntegerToString(i), x, cy, arr[i], false);
+        cy += ROW_H;
+        drawn++;
+    }
+    
+    // 合计行
+    if(cnt > 0)
+    {
+        StatRow total;
+        InitRow(total);
+        total.label = "合计";
+        for(int i=0; i<cnt; i++)
+        {
+            total.lots       += arr[i].lots;
+            total.count      += arr[i].count;
+            total.profit     += arr[i].profit;
+            total.commission += arr[i].commission;
+            total.swap       += arr[i].swap;
+            total.deposit    += arr[i].deposit;
+            total.winCount   += arr[i].winCount;
+            total.winCountW  += arr[i].winCountW;
+            total.winProfit  += arr[i].winProfit;
+            total.lossProfit += arr[i].lossProfit;
+            if(arr[i].minLots < total.minLots) total.minLots = arr[i].minLots;
+            if(arr[i].maxLots > total.maxLots) total.maxLots = arr[i].maxLots;
+            if(arr[i].minDuration < total.minDuration) total.minDuration = arr[i].minDuration;
+            if(arr[i].maxDuration > total.maxDuration) total.maxDuration = arr[i].maxDuration;
+            total.avgDuration += arr[i].avgDuration;
+        }
+        if(cnt > 0) total.avgDuration /= cnt;
+        if(total.minLots >= 1e9) total.minLots = 0;
+        total.balance = AccountBalance();
+        FinalizeRow(total, AccountBalance());
+        
+        MakeRect(g_prefix+"row_bg_total", x, cy, Panel_Width, ROW_H, C'40,40,60');
+        DrawStatRow("row_total", x, cy, total, false);
+        drawn++;
+    }
+    
+    return drawn;
 }
 
 //==========================================================================
-// OnInit
+// 绘制综合标签页
+//==========================================================================
+int DrawSummaryTab(int x, int y)
+{
+    int cy = y;
+    
+    // 日期标题
+    MakeRect(g_prefix+"sum_date_bg", x, cy, Panel_Width, ROW_H, C'25,25,40');
+    string dateStr = TimeToStr(TimeCurrent(), TIME_DATE);
+    MakeLabel(g_prefix+"sum_date", x+5, cy+2, dateStr, clrAqua, FontSize);
+    cy += ROW_H;
+    
+    // 表头
+    MakeRect(g_prefix+"hdr_bg", x, cy, Panel_Width, ROW_H, C'30,30,50');
+    DrawHeader(x, cy, "日期");
+    cy += ROW_H;
+    
+    // 持仓行
+    MakeRect(g_prefix+"row_bg_h", x, cy, Panel_Width, ROW_H, C'15,15,25');
+    DrawStatRow("row_h", x, cy, g_holdingSum, true);
+    cy += ROW_H;
+    
+    // 近N天日统计（最多显示Day_Count条，但综合视图只显示最近7天）
+    int showDays = MathMin(g_dayCount, 7);
+    for(int i=0; i<showDays; i++)
+    {
+        color rowBg = (i%2==0) ? C'15,15,25' : C'20,20,35';
+        MakeRect(g_prefix+"row_bg_d"+IntegerToString(i), x, cy, Panel_Width, ROW_H, rowBg);
+        DrawStatRow("row_d"+IntegerToString(i), x, cy, g_dayStat[i], false);
+        cy += ROW_H;
+    }
+    
+    // 本周/月/季/年汇总
+    MakeRect(g_prefix+"row_bg_ws", x, cy, Panel_Width, ROW_H, C'20,20,35');
+    DrawStatRow("row_ws", x, cy, g_weekSum, false);
+    cy += ROW_H;
+    
+    MakeRect(g_prefix+"row_bg_ms", x, cy, Panel_Width, ROW_H, C'15,15,25');
+    DrawStatRow("row_ms", x, cy, g_monthSum, false);
+    cy += ROW_H;
+    
+    MakeRect(g_prefix+"row_bg_qs", x, cy, Panel_Width, ROW_H, C'20,20,35');
+    DrawStatRow("row_qs", x, cy, g_quarterSum, false);
+    cy += ROW_H;
+    
+    MakeRect(g_prefix+"row_bg_ys", x, cy, Panel_Width, ROW_H, C'15,15,25');
+    DrawStatRow("row_ys", x, cy, g_yearSum, false);
+    cy += ROW_H;
+    
+    // 账户持仓汇总
+    MakeRect(g_prefix+"row_bg_ts", x, cy, Panel_Width, ROW_H, C'30,30,50');
+    DrawStatRow("row_ts", x, cy, g_totalSum, false);
+    cy += ROW_H;
+    
+    // 多空单汇总
+    cy += 4;
+    string buyStr = "多单Buy  单数: " + IntegerToString(g_buySum.count) +
+                    "  手数: " + FormatLots(g_buySum.lots) +
+                    "  盈亏: " + FormatMoney(g_buySum.profit);
+    MakeLabel(g_prefix+"lbl_buy", x+5, cy, buyStr, ColorProfit, FontSize);
+    cy += ROW_H;
+    
+    string sellStr = "空单Sell  单数: " + IntegerToString(g_sellSum.count) +
+                     "  手数: " + FormatLots(g_sellSum.lots) +
+                     "  盈亏: " + FormatMoney(g_sellSum.profit);
+    MakeLabel(g_prefix+"lbl_sell", x+5, cy, sellStr, ColorLoss, FontSize);
+    cy += ROW_H;
+    
+    return (cy - y) / ROW_H + 2;
+}
+
+//==========================================================================
+// 绘制账户信息标签页
+//==========================================================================
+int DrawAccountTab(int x, int y)
+{
+    int cy = y + 5;
+    int lineH = ROW_H + 2;
+    int col1x = x + 5;
+    int col2x = x + 300;
+    int col3x = x + 600;
+    color lc = ColorLabel;
+    color vc = ColorNeutral;
+    
+    // 账户基本信息
+    MakeLabel(g_prefix+"acc_0", col1x, cy, "账号="+IntegerToString(AccountNumber()), vc, FontSize);
+    MakeLabel(g_prefix+"acc_1", col2x, cy, "姓名="+AccountName(), vc, FontSize);
+    MakeLabel(g_prefix+"acc_2", col3x, cy, "公司="+AccountCompany(), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_3", col1x, cy, "服务器="+AccountServer(), vc, FontSize);
+    MakeLabel(g_prefix+"acc_4", col2x, cy, "货币="+AccountCurrency(), vc, FontSize);
+    MakeLabel(g_prefix+"acc_5", col3x, cy, "杠杆=1:"+IntegerToString(AccountLeverage()), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_6", col1x, cy, "余额="+DoubleToString(AccountBalance(),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_7", col2x, cy, "净值="+DoubleToString(AccountEquity(),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_8", col3x, cy, "可用="+DoubleToString(AccountFreeMargin(),2), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_9",  col1x, cy, "保证金="+DoubleToString(AccountMargin(),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_10", col2x, cy, "浮动盈亏="+DoubleToString(AccountEquity()-AccountBalance(),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_11", col3x, cy, "信用="+DoubleToString(AccountCredit(),2), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_12", col1x, cy, "止损比例="+DoubleToString(AccountStopoutLevel(),0)+"%", vc, FontSize);
+    MakeLabel(g_prefix+"acc_13", col2x, cy, "止损模式="+IntegerToString(AccountStopoutMode()), vc, FontSize);
+    MakeLabel(g_prefix+"acc_14", col3x, cy, "本地时间="+TimeToStr(TimeLocal(), TIME_DATE|TIME_MINUTES), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_15", col1x, cy, "服务器时间="+TimeToStr(TimeCurrent(), TIME_DATE|TIME_MINUTES), vc, FontSize);
+    MakeLabel(g_prefix+"acc_16", col2x, cy, "持仓单数="+IntegerToString(OrdersTotal()), vc, FontSize);
+    MakeLabel(g_prefix+"acc_17", col3x, cy, "历史记录数="+IntegerToString(OrdersHistoryTotal()), vc, FontSize);
+    cy += lineH;
+    
+    // 当前品种信息
+    cy += 5;
+    MakeLabel(g_prefix+"acc_sym_hdr", col1x, cy, "--- 当前品种: "+Symbol()+" ---", ColorHeader, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_s0", col1x, cy, "点差="+IntegerToString((int)MarketInfo(Symbol(),MODE_SPREAD)), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s1", col2x, cy, "最小手数="+DoubleToString(MarketInfo(Symbol(),MODE_MINLOT),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s2", col3x, cy, "最大手数="+DoubleToString(MarketInfo(Symbol(),MODE_MAXLOT),2), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_s3", col1x, cy, "手数步长="+DoubleToString(MarketInfo(Symbol(),MODE_LOTSTEP),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s4", col2x, cy, "合约大小="+DoubleToString(MarketInfo(Symbol(),MODE_LOTSIZE),0), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s5", col3x, cy, "点值="+DoubleToString(MarketInfo(Symbol(),MODE_TICKVALUE),4), vc, FontSize);
+    cy += lineH;
+    
+    MakeLabel(g_prefix+"acc_s6", col1x, cy, "保证金="+DoubleToString(MarketInfo(Symbol(),MODE_MARGINREQUIRED),2), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s7", col2x, cy, "隔夜利息多="+DoubleToString(MarketInfo(Symbol(),MODE_SWAPLONG),4), vc, FontSize);
+    MakeLabel(g_prefix+"acc_s8", col3x, cy, "隔夜利息空="+DoubleToString(MarketInfo(Symbol(),MODE_SWAPSHORT),4), vc, FontSize);
+    cy += lineH;
+    
+    return (cy - y) / ROW_H + 2;
+}
+
+//==========================================================================
+// 绘制轨迹标签页
+//==========================================================================
+int DrawTrailTab(int x, int y)
+{
+    MakeLabel(g_prefix+"trail_info", x+5, y+5,
+        "轨迹功能：点击日/周/月等统计行可在图表上标注该期间的开平仓轨迹",
+        ColorLabel, FontSize);
+    return 3;
+}
+
+//==========================================================================
+// 指标初始化
 //==========================================================================
 int OnInit()
 {
-    // 设置指标缓冲区
-    SetIndexBuffer(0, DummyBuffer);
-    SetIndexStyle(0, DRAW_NONE);
-    SetIndexLabel(0, NULL);
-
-    // 初始化面板位置
-    g_panelX = PanelStartX;
-    g_panelY = PanelStartY;
-    g_minimized = ForceMinimize;
-    g_currentTab = DefaultTab;
-
-    // 验证DefaultTab
-    bool validTab = false;
-    for(int i=0; i<TAB_COUNT; i++)
-        if(TABS[i] == g_currentTab) { validTab = true; break; }
-    if(!validTab) g_currentTab = "综";
-
-    // 开启鼠标移动事件
-    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, 1);
-
-    // 首次刷新
+    g_panelX = Panel_X;
+    g_panelY = Panel_Y;
+    g_activeTab = Default_Tab;
+    
+    ParseMagicFilter();
+    g_filterSymbol = Only_Symbol;
+    
+    InitColWidths();
+    
+    // 启用鼠标事件
+    ChartSetInteger(0, CHART_EVENT_MOUSE_MOVE, true);
+    ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
+    
+    // 初始加载数据
     RefreshAll();
-
-    // 设置定时器
-    EventSetTimer(RefreshMinutes * 60);
-
-    return(INIT_SUCCEEDED);
+    
+    // 绘制面板
+    DeleteAllObjects();
+    DrawPanel();
+    ChartRedraw();
+    
+    return INIT_SUCCEEDED;
 }
 
 //==========================================================================
-// OnDeinit
+// 指标卸载
 //==========================================================================
 void OnDeinit(const int reason)
 {
-    EventKillTimer();
     DeleteAllObjects();
-
-    // 删除轨迹对象
-    int total = ObjectsTotal();
-    for(int i=total-1; i>=0; i--)
-    {
-        string name = ObjectName(i);
-        if(StringFind(name, PREFIX) == 0)
-            ObjectDelete(name);
-    }
     ChartRedraw();
 }
 
 //==========================================================================
-// OnCalculate
+// 主计算函数
 //==========================================================================
-int OnCalculate(const int rates_total,
-                const int prev_calculated,
-                const datetime &time[],
-                const double &open[],
-                const double &high[],
-                const double &low[],
-                const double &close[],
-                const long &tick_volume[],
-                const long &volume[],
-                const int &spread[])
+int OnCalculate(const int rates_total, const int prev_calculated,
+                const datetime &time[], const double &open[],
+                const double &high[], const double &low[],
+                const double &close[], const long &tick_volume[],
+                const long &volume[], const int &spread[])
 {
-    // 检查是否需要刷新（定时刷新）
-    if(TimeCurrent() - g_lastRefresh >= RefreshMinutes * 60)
+    // 每60秒刷新一次
+    datetime now = TimeCurrent();
+    if(now - g_lastRefresh >= 60)
+    {
         RefreshAll();
-
-    return(rates_total);
+        DeleteAllObjects();
+        DrawPanel();
+        ChartRedraw();
+    }
+    return rates_total;
 }
 
 //==========================================================================
-// OnTimer
+// 图表事件处理
 //==========================================================================
-void OnTimer()
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
-    RefreshAll();
-}
-
-//==========================================================================
-// OnChartEvent - 处理鼠标点击事件
-//==========================================================================
-void OnChartEvent(const int id,
-                  const long &lparam,
-                  const double &dparam,
-                  const string &sparam)
-{
-    // 按钮点击事件
+    // 记录鼠标位置（用于拖动）
+    if(id == CHARTEVENT_MOUSE_MOVE)
+    {
+        int mx = (int)lparam;
+        int my = (int)dparam;
+        g_lastMouseX = mx;
+        g_lastMouseY = my;
+        
+        if(g_dragging)
+        {
+            // 计算新位置
+            int newX = g_dragPanelX + (mx - g_dragStartX);
+            int newY = g_dragPanelY + (my - g_dragStartY);
+            if(newX < 0) newX = 0;
+            if(newY < 0) newY = 0;
+            
+            if(newX != g_panelX || newY != g_panelY)
+            {
+                g_panelX = newX;
+                g_panelY = newY;
+                DeleteAllObjects();
+                DrawPanel();
+                ChartRedraw();
+            }
+        }
+        return;
+    }
+    
+    // 鼠标左键释放 - 停止拖动
+    if(id == CHARTEVENT_KEYDOWN)
+    {
+        g_dragging = false;
+        return;
+    }
+    
+    // 对象点击事件
     if(id == CHARTEVENT_OBJECT_CLICK)
     {
-        string objName = sparam;
-
-        // 最小化按钮
-        if(objName == PREFIX + "btn_min")
+        string name = sparam;
+        
+        // 折叠/展开按钮
+        if(name == g_prefix+"btn_min" || name == g_prefix+"btn_min_bg")
         {
             g_minimized = !g_minimized;
-            ObjectSetInteger(0, objName, OBJPROP_STATE, false);
+            DeleteAllObjects();
             DrawPanel();
+            ChartRedraw();
             return;
         }
-
-        // 移动按钮：开始拖拽
-        if(objName == PREFIX + "btn_move")
+        
+        // 移动按钮 - 开始拖动
+        if(name == g_prefix+"btn_move" || name == g_prefix+"btn_move_bg")
         {
-            // 使用最后记录的鼠标位置（由CHARTEVENT_MOUSE_MOVE持续更新）
-            g_dragging = true;
-            g_dragOffsetX = g_lastMouseX - g_panelX;
-            g_dragOffsetY = g_lastMouseY - g_panelY;
-            ObjectSetInteger(0, objName, OBJPROP_STATE, false);
-            return;
-        }
-
-        // TAB切换
-        for(int i=0; i<TAB_COUNT; i++)
-        {
-            if(objName == PREFIX + "tab_" + TABS[i])
+            g_dragging = !g_dragging;
+            if(g_dragging)
             {
-                g_currentTab = TABS[i];
-                ObjectSetInteger(0, objName, OBJPROP_STATE, false);
+                // 使用MOUSE_MOVE事件记录的最新鼠标坐标
+                g_dragStartX = g_lastMouseX;
+                g_dragStartY = g_lastMouseY;
+                g_dragPanelX = g_panelX;
+                g_dragPanelY = g_panelY;
+            }
+            return;
+        }
+        
+        // 标签页切换
+        string tabs[11];
+        tabs[0]="综"; tabs[1]="日"; tabs[2]="周"; tabs[3]="月"; tabs[4]="季";
+        tabs[5]="年"; tabs[6]="币"; tabs[7]="M"; tabs[8]="备"; tabs[9]="账户"; tabs[10]="轨迹";
+        for(int i=0; i<11; i++)
+        {
+            if(name == g_prefix+"tab_"+tabs[i] || name == g_prefix+"tab_"+tabs[i]+"_bg")
+            {
+                g_activeTab = tabs[i];
+                DeleteAllObjects();
                 DrawPanel();
+                ChartRedraw();
                 return;
             }
         }
     }
-
-    // 鼠标移动事件（拖拽面板）
-    if(id == CHARTEVENT_MOUSE_MOVE)
+    
+    // 鼠标点击（用于拖动时的坐标更新）
+    if(id == CHARTEVENT_CLICK)
     {
-        int mouseX = (int)lparam;
-        int mouseY = (int)dparam;
-        int mouseBtn = (int)StringToInteger(sparam);
-
-        // 始终记录最新鼠标位置
-        g_lastMouseX = mouseX;
-        g_lastMouseY = mouseY;
-
         if(g_dragging)
         {
-            // 左键松开则停止拖拽
-            if((mouseBtn & 1) == 0)
-            {
-                g_dragging = false;
-                // 重置移动按钮状态
-                string btnName = PREFIX + "btn_move";
-                if(ObjectFind(btnName) >= 0)
-                    ObjectSetInteger(0, btnName, OBJPROP_STATE, false);
-            }
-            else
-            {
-                // 更新面板位置
-                int newX = mouseX - g_dragOffsetX;
-                int newY = mouseY - g_dragOffsetY;
-                if(newX < 0) newX = 0;
-                if(newY < 0) newY = 0;
-                g_panelX = newX;
-                g_panelY = newY;
-                DrawPanel();
-            }
+            // 点击确认新位置，停止拖动
+            g_dragging = false;
         }
     }
-
 }
-
-//==========================================================================
-// END OF INDICATOR
-//==========================================================================
