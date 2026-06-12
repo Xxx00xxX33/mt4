@@ -80,8 +80,8 @@ struct TradeRec
     string   comment;
     double   maxDD;       // 最大浮亏(负数)
     double   maxProfit;   // 最大浮盈
+    bool     isOpen;      // 是否持仓中
 };
-
 struct DepositRec
 {
     datetime time;
