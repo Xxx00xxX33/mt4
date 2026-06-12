@@ -176,6 +176,13 @@ struct TradeRecord
     double   maxLoss;    // 持仓期间最大浮亏
 };
 
+// 出入金记录
+struct DepositRecord
+{
+    datetime time;    // 时间
+    double   amount;  // 金额（正=入金，负=出金）
+};
+
 // 统计汇总结构
 struct StatSummary
 {
@@ -236,6 +243,10 @@ StatSummary g_magicStat[];
 int         g_magicCount = 0;
 StatSummary g_commentStat[];
 int         g_commentCount = 0;
+
+// 出入金记录
+DepositRecord g_deposits[];
+int           g_depositCount = 0;
 
 // 净值曲线数据
 double g_equityCurve[];
@@ -643,21 +654,18 @@ void CSV_SaveIncremental()
 }
 
 //==========================================================================
-// 从MT4历史记录加载近期数据（CSV_DaysBack天内，不写CSV）
+// 从 MT4历史记录加载所有数据（不依赖cutoff，读取全部MT4历史）
+// 已在CSV中的记录不重复加载
 //==========================================================================
 void LoadRecentFromMT4()
 {
-    datetime cutoff = TimeCurrent() - (datetime)(CSV_DaysBack * 86400);
-    cutoff = cutoff - cutoff % 86400;
-
     int total = OrdersHistoryTotal();
     for(int i=0; i<total; i++)
     {
         if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
         if(OrderType() != OP_BUY && OrderType() != OP_SELL) continue;
-        if(OrderCloseTime() < cutoff) continue;
         if(!PassFilter(OrderSymbol(), OrderMagicNumber(), OrderComment(), OrderType())) continue;
-        if(CSV_HasTicket(OrderTicket())) continue;
+        if(CSV_HasTicket(OrderTicket())) continue; // 已在CSV中的跳过，避免重复
         if(g_tradeCount >= MAX_TRADES) break;
 
         TradeRecord tr;
@@ -721,6 +729,55 @@ void LoadOpenOrders()
 
 
 //==========================================================================
+// 加载出入金记录（OP_BALANCE=6, OP_CREDIT=7）
+//==========================================================================
+void LoadDeposits()
+{
+    g_depositCount = 0;
+    ArrayResize(g_deposits, 1000);
+
+    int total = OrdersHistoryTotal();
+    for(int i=0; i<total; i++)
+    {
+        if(!OrderSelect(i, SELECT_BY_POS, MODE_HISTORY)) continue;
+        int ot = OrderType();
+        if(ot != 6 && ot != 7) continue; // 只要 OP_BALANCE 和 OP_CREDIT
+        if(g_depositCount >= 1000) break;
+        g_deposits[g_depositCount].time   = OrderOpenTime();
+        g_deposits[g_depositCount].amount = OrderProfit();
+        g_depositCount++;
+    }
+    // 升序排序
+    for(int i=0; i<g_depositCount-1; i++)
+        for(int j=i+1; j<g_depositCount; j++)
+            if(g_deposits[i].time > g_deposits[j].time)
+            {
+                DepositRecord tmp = g_deposits[i];
+                g_deposits[i] = g_deposits[j];
+                g_deposits[j] = tmp;
+            }
+}
+
+// 获取某时间点之前的出入金总和
+double GetDepositBefore(datetime t)
+{
+    double total = 0;
+    for(int i=0; i<g_depositCount; i++)
+        if(g_deposits[i].time < t) total += g_deposits[i].amount;
+    return total;
+}
+
+// 获取某时间段内的出入金总和
+double GetDepositInRange(datetime tFrom, datetime tTo)
+{
+    double total = 0;
+    for(int i=0; i<g_depositCount; i++)
+        if(g_deposits[i].time >= tFrom && g_deposits[i].time < tTo)
+            total += g_deposits[i].amount;
+    return total;
+}
+
+//==========================================================================
 // 统计计算：按日统计
 //==========================================================================
 void CalcDayStats()
@@ -753,22 +810,30 @@ void CalcDayStats()
             if(dates[i] > dates[j]) { string tmp=dates[i]; dates[i]=dates[j]; dates[j]=tmp; }
 
     // 计算每天结束时的运行余额（按升序日期累计）
-    // 初始余额 = 当前账户余额 - 所有已关闭交易的盈亏之和
+    // 初始余额 = 当前账户余额 - 所有已关闭交易的盈亏之和 - 所有出入金
     double totalClosedPnL = 0;
     for(int i=0; i<g_tradeCount; i++)
     {
         if(g_trades[i].closeTime == 0) continue;
         totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
-    double startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = AccountBalance();
+    double totalDeposits = 0;
+    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
+    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
+    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = 1;
 
-    // 按升序计算每天结束余额
+    // 按升序计算每天结束余额（包含当天出入金）
     double dayEndBalance[];
     ArrayResize(dayEndBalance, dateCount);
     double runBal = startBalance;
     for(int di=0; di<dateCount; di++)
     {
+        // 当天的出入金
+        datetime dayStart = StringToTime(dates[di]);
+        datetime dayEnd   = dayStart + 86400;
+        runBal += GetDepositInRange(dayStart, dayEnd);
+        // 当天的交易盈亏
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
@@ -797,19 +862,25 @@ void CalcDayStats()
         InitStat(s);
         s.label = dates[di];
 
-        // 该天开始余额 = 该天结束余额 - 该天盈亏
+        datetime dayStart = StringToTime(dates[di]);
+        datetime dayEnd   = dayStart + 86400;
+
+        // 该天的出入金
+        s.deposit = GetDepositInRange(dayStart, dayEnd);
+
+        // 该天开始余额 = 该天结束余额 - 该天盈亏 - 该天出入金
         double dayProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
             string d = TimeToStr(g_trades[i].closeTime, TIME_DATE);
             if(d != dates[di]) continue;
-            AccumTrade(s, g_trades[i], 1.0); // 先用1作占位符
+            AccumTrade(s, g_trades[i], 1.0);
             dayProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
-        // 该天开始余额
-        double periodStartBal = dayEndBalance[di] - dayProfit;
+        // 该天开始余额（不含当天出入金，出入金不计入收益率）
+        double periodStartBal = dayEndBalance[di] - dayProfit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
 
         s.balance = dayEndBalance[di];
@@ -877,15 +948,20 @@ void CalcWeekStats()
         if(g_trades[i].closeTime == 0) continue;
         totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
-    double startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = AccountBalance();
+    double totalDeposits = 0;
+    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
+    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
+    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = 1;
 
-    // 按升序计算每周结束余额
+    // 按升序计算每周结束余额（包含出入金）
     double wkEndBal[];
     ArrayResize(wkEndBal, wCount);
     double runBal = startBalance;
     for(int wi=0; wi<wCount; wi++)
     {
+        datetime wkEnd = weekStarts[wi] + 7*86400;
+        runBal += GetDepositInRange(weekStarts[wi], wkEnd);
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
@@ -912,6 +988,9 @@ void CalcWeekStats()
         InitStat(s);
         s.label = GetWeekLabel(weekStarts[wi]);
 
+        datetime wkEnd = weekStarts[wi] + 7*86400;
+        s.deposit = GetDepositInRange(weekStarts[wi], wkEnd);
+
         double wkProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
@@ -921,7 +1000,7 @@ void CalcWeekStats()
             wkProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
-        double periodStartBal = wkEndBal[wi] - wkProfit;
+        double periodStartBal = wkEndBal[wi] - wkProfit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
         s.balance = wkEndBal[wi];
 
@@ -985,14 +1064,23 @@ void CalcMonthStats()
         if(g_trades[i].closeTime == 0) continue;
         totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
-    double startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = AccountBalance();
+    double totalDeposits = 0;
+    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
+    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
+    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = 1;
 
     double moEndBal[];
     ArrayResize(moEndBal, mCount);
     double runBal = startBalance;
     for(int mi=0; mi<mCount; mi++)
     {
+        // 当月出入金
+        int nextMon = TimeMonth(monthStarts[mi]) + 1;
+        int nextYear = TimeYear(monthStarts[mi]);
+        if(nextMon > 12) { nextMon = 1; nextYear++; }
+        datetime moEnd = StringToTime(StringFormat("%04d.%02d.01", nextYear, nextMon));
+        runBal += GetDepositInRange(monthStarts[mi], moEnd);
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
@@ -1019,6 +1107,12 @@ void CalcMonthStats()
         InitStat(s);
         s.label = GetMonthLabel(monthStarts[mi]);
 
+        int nextMon = TimeMonth(monthStarts[mi]) + 1;
+        int nextYear = TimeYear(monthStarts[mi]);
+        if(nextMon > 12) { nextMon = 1; nextYear++; }
+        datetime moEnd = StringToTime(StringFormat("%04d.%02d.01", nextYear, nextMon));
+        s.deposit = GetDepositInRange(monthStarts[mi], moEnd);
+
         double moProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
@@ -1028,7 +1122,7 @@ void CalcMonthStats()
             moProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
-        double periodStartBal = moEndBal[mi] - moProfit;
+        double periodStartBal = moEndBal[mi] - moProfit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
         s.balance = moEndBal[mi];
 
@@ -1123,14 +1217,25 @@ void CalcQuarterStats()
         if(g_trades[i].closeTime == 0) continue;
         totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
-    double startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = AccountBalance();
+    double totalDeposits = 0;
+    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
+    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
+    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = 1;
 
     double qEndBal[];
     ArrayResize(qEndBal, qCount);
     double runBal = startBalance;
     for(int qi=0; qi<qCount; qi++)
     {
+        // 当季度的出入金
+        datetime qStart = GetQuarterStart(qRepTime[qi]);
+        int qMon = TimeMonth(qRepTime[qi]);
+        int qEndMon = ((qMon-1)/3)*3 + 4;
+        int qEndYear = TimeYear(qRepTime[qi]);
+        if(qEndMon > 12) { qEndMon -= 12; qEndYear++; }
+        datetime qEnd = StringToTime(StringFormat("%04d.%02d.01", qEndYear, qEndMon));
+        runBal += GetDepositInRange(qStart, qEnd);
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
@@ -1158,6 +1263,14 @@ void CalcQuarterStats()
         InitStat(s);
         s.label = GetQuarterLabel(qRepTime[qi]);
 
+        datetime qStart = GetQuarterStart(qRepTime[qi]);
+        int qMon = TimeMonth(qRepTime[qi]);
+        int qEndMon = ((qMon-1)/3)*3 + 4;
+        int qEndYear = TimeYear(qRepTime[qi]);
+        if(qEndMon > 12) { qEndMon -= 12; qEndYear++; }
+        datetime qEnd = StringToTime(StringFormat("%04d.%02d.01", qEndYear, qEndMon));
+        s.deposit = GetDepositInRange(qStart, qEnd);
+
         double qProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
@@ -1167,7 +1280,7 @@ void CalcQuarterStats()
             qProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
-        double periodStartBal = qEndBal[qi] - qProfit;
+        double periodStartBal = qEndBal[qi] - qProfit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
         s.balance = qEndBal[qi];
 
@@ -1234,14 +1347,21 @@ void CalcYearStats()
         if(g_trades[i].closeTime == 0) continue;
         totalClosedPnL += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
     }
-    double startBalance = AccountBalance() - totalClosedPnL;
-    if(startBalance <= 0) startBalance = AccountBalance();
+    double totalDeposits = 0;
+    for(int i=0; i<g_depositCount; i++) totalDeposits += g_deposits[i].amount;
+    double startBalance = AccountBalance() - totalClosedPnL - totalDeposits;
+    if(startBalance <= 0) startBalance = AccountBalance() - totalClosedPnL;
+    if(startBalance <= 0) startBalance = 1;
 
     double yEndBal[];
     ArrayResize(yEndBal, yCount);
     double runBal = startBalance;
     for(int yi=0; yi<yCount; yi++)
     {
+        // 当年出入金
+        int yr = TimeYear(yStarts[yi]);
+        datetime yEnd = StringToTime(StringFormat("%04d.01.01", yr+1));
+        runBal += GetDepositInRange(yStarts[yi], yEnd);
         for(int i=0; i<g_tradeCount; i++)
         {
             if(g_trades[i].closeTime == 0) continue;
@@ -1268,6 +1388,10 @@ void CalcYearStats()
         InitStat(s);
         s.label = GetYearLabel(yStarts[yi]);
 
+        int yr = TimeYear(yStarts[yi]);
+        datetime yEnd = StringToTime(StringFormat("%04d.01.01", yr+1));
+        s.deposit = GetDepositInRange(yStarts[yi], yEnd);
+
         double yProfit = 0;
         for(int i=0; i<g_tradeCount; i++)
         {
@@ -1277,7 +1401,7 @@ void CalcYearStats()
             yProfit += g_trades[i].profit + g_trades[i].commission + g_trades[i].swap;
         }
 
-        double periodStartBal = yEndBal[yi] - yProfit;
+        double periodStartBal = yEndBal[yi] - yProfit - s.deposit;
         if(periodStartBal <= 0) periodStartBal = 1;
         s.balance = yEndBal[yi];
 
@@ -2330,10 +2454,11 @@ void DrawPanel()
     bool showChart = (g_currentTab != "综");
     int effectiveChartH = showChart ? CHART_H : 0;
 
-    int totalH = TITLE_H + TAB_H + effectiveChartH + tableH;
+    // 折叠时面板高度仅为标题栏
+    int totalH = g_minimized ? TITLE_H : (TITLE_H + TAB_H + effectiveChartH + tableH);
     PANEL_H = totalH;
 
-    // 主背景
+    // 主背景（折叠时只显示标题栏高度）
     CreateRect("bg_main", px, py, panelW, totalH, ColorBG, 1, ColorBorder);
 
     // 标题栏
@@ -2349,7 +2474,7 @@ void DrawPanel()
     string titleText = CustomTitle + "，M=" + FilterMagic;
     CreateLabel("lbl_title", titleX, py+3, titleText, ColorGreen, FontSize+1);
 
-    if(g_minimized) return;
+    if(g_minimized) { ChartRedraw(); return; }
 
     // TAB栏
     int tabX = px;
@@ -2407,10 +2532,13 @@ void RefreshAll()
     // 4. 加载当前持仓
     LoadOpenOrders();
 
-    // 5. 计算所有统计
+    // 5. 加载出入金记录
+    LoadDeposits();
+
+    // 6. 计算所有统计
     CalcAllStats();
 
-    // 6. 重绘面板
+    // 7. 重绘面板
     DrawPanel();
 
     g_lastRefresh = TimeCurrent();
