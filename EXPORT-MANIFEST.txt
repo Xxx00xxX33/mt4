@@ -1,0 +1,4 @@
+Source host: netcupde (RS1000G9 / 188.68.53.60)
+Source path: /root/.claude/skills/mql4-manual
+Export archive sha256: ad3665c03fe890f07e133178d06991605f8887dae1b89be72d6a8a650699dc14
+Files exported: 27
