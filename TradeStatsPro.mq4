@@ -465,18 +465,18 @@ void LoadFromMT4()
     
     // 加载持仓订单
     int openTotal = OrdersTotal();
-    for(int i=0; i<openTotal; i++)
+    for(int i3=0; i3<openTotal; i3++)
     {
-        if(!OrderSelect(i, SELECT_BY_POS, MODE_TRADES)) continue;
-        int type = OrderType();
-        if(type != OP_BUY && type != OP_SELL) continue;
+        if(!OrderSelect(i3, SELECT_BY_POS, MODE_TRADES)) continue;
+        int type3 = OrderType();
+        if(type3 != OP_BUY && type3 != OP_SELL) continue;
         if(!PassFilter(OrderMagicNumber(), OrderSymbol())) continue;
         if(g_tradeCount >= MAX_TRADES) break;
         
         TradeRec r;
         r.ticket      = OrderTicket();
         r.symbol      = OrderSymbol();
-        r.type        = type;
+        r.type        = type3;
         r.lots        = OrderLots();
         r.openTime    = OrderOpenTime();
         r.closeTime   = 0; // 持仓
